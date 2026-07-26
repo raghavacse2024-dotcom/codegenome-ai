@@ -4,7 +4,7 @@ export type Analysis = {
   source: 'live' | 'demo-safe'
   events: { agent: string; status: string; rationale: string; at: string }[]
   results: {
-    architecture: { data: { framework: string; layers: string[]; violations: string[]; summary: string } }
+    architecture: { data: { framework: string; layers: string[]; violations: string[]; summary: string; structure: { sampledFileCount: number; rootDirectories: string[]; languages: [string, number][]; entryPoints: string[] } } }
     debt: { data: { hotspots: { path: string; lines: number; score: number; signals: string[] }[]; totalDebtScore: number; summary: string } }
     cost: { data: { annualCost: number; priority: string; roiMonths: number; assumption: string } }
     refactor: { data: { target: string; steps: string[]; scaffolds: Scaffold[]; pullRequestTitle: string } }
