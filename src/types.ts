@@ -1,0 +1,13 @@
+export type Scaffold = { path: string; content: string }
+export type Analysis = {
+  repo: { owner: string; repository: string; url: string; description: string; stars: number; defaultBranch: string }
+  source: 'live' | 'demo-safe'
+  events: { agent: string; status: string; rationale: string; at: string }[]
+  results: {
+    architecture: { data: { framework: string; layers: string[]; violations: string[]; summary: string } }
+    debt: { data: { hotspots: { path: string; lines: number; score: number; signals: string[] }[]; totalDebtScore: number; summary: string } }
+    cost: { data: { annualCost: number; priority: string; roiMonths: number; assumption: string } }
+    refactor: { data: { target: string; steps: string[]; scaffolds: Scaffold[]; pullRequestTitle: string } }
+    review: { data: { verdict: string; checks: string[]; caveat?: string | null } }
+  }
+}
