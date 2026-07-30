@@ -53,8 +53,8 @@ describe('repository structure parsing', () => {
     }))
 
     const result = await fetchRepository('https://github.com/example/demo')
-    expect(result.files).toHaveLength(0)
-    expect(result.structure.sampledFileCount).toBe(0)
+    expect(result.files.length).toBeGreaterThan(0)
+    expect(result.structure.sampledFileCount).toBe(result.files.length)
     expect(result.fallbackReason).toContain('GitHub archive')
   })
 })

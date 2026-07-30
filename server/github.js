@@ -1,24 +1,12 @@
 import JSZip from 'jszip'
 import { parseRepositoryUrl } from './contracts.js'
+import { createDemoRepository } from './services/demoCacheService.js'
 const MAX_FILES = 75, MAX_FILE_BYTES = 45_000
 const CODE_EXTENSIONS = /\.(?:js|jsx|ts|tsx|py|java|go|rb|php|cs|rs|vue|svelte|css|html|sql)$/i
 const LANGUAGE_BY_EXTENSION = { js: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript', py: 'Python', java: 'Java', go: 'Go', rb: 'Ruby', php: 'PHP', cs: 'C#', rs: 'Rust', vue: 'Vue', svelte: 'Svelte', css: 'CSS', html: 'HTML', sql: 'SQL' }
 const headers = () => ({ Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) })
 function fallbackRepository(owner, repository, reason) {
-  return {
-    repo: {
-      owner,
-      repository,
-      url: `https://github.com/${owner}/${repository}`,
-      description: '',
-      stars: 0,
-      defaultBranch: 'main',
-    },
-    files: [],
-    structure: buildStructure([]),
-    truncated: false,
-    fallbackReason: reason,
-  }
+  return createDemoRepository(owner, repository, reason, buildStructure)
 }
 async function githubFetch(path) {
   const response = await fetch(`https://api.github.com${path}`, { headers: headers(), signal: AbortSignal.timeout(15_000) })

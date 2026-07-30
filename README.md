@@ -1,20 +1,19 @@
 # CodeGenome AI
 
-CodeGenome AI turns a public GitHub repository into an evidence-backed technical-debt report, business-cost estimate, and downloadable refactoring scaffold. It was built for Theme 1: Agentic Coding.
+CodeGenome AI turns a public GitHub repository into an evidence-backed technical-debt report, business-cost estimate, grounded repository Q&A, and downloadable refactoring scaffold.
 
-## What it does
+## What Works
 
-Five sequential agents make their handoffs visible in the dashboard:
+The production app runs as one Render web service. Vite builds the React dashboard, Express serves the static bundle, and the same Node process exposes:
 
-1. **Architecture** identifies framework signals, layers, and boundary violations.
-2. **Technical Debt** ranks static-analysis hotspots.
-3. **Risk & Cost** converts debt into priority and annual maintenance drag.
-4. **Refactor Planner** writes an additive module and test scaffold.
-5. **Review** validates evidence, safety, and test coverage.
+- `GET /api/health`: service status, timestamp, and live/demo mode.
+- `POST /api/analyze`: validates a public GitHub URL, samples repository files, runs Architecture -> Technical Debt -> Risk & Cost -> Refactor Planner -> Review, and returns an `analysisId`.
+- `POST /api/download`: downloads a ZIP of generated scaffold files for a completed analysis.
+- `POST /api/qa`: answers questions grounded in the completed analysis.
 
-The app only accepts public `https://github.com/owner/repository` URLs. It never writes to the analyzed repository.
+The analyzed repository is never modified.
 
-## Local setup
+## Local Setup
 
 ```bash
 cp .env.example .env
@@ -24,24 +23,23 @@ npm run dev
 
 Open `http://localhost:5173`. The Node API runs at `http://localhost:3001`.
 
-`GITHUB_TOKEN` is optional but increases public GitHub API rate limits. `OPENAI_API_KEY` and `OPENAI_MODEL` are both optional; when configured, the server asks OpenAI to improve each agent’s structured output. Without them, CodeGenome runs a clearly labelled deterministic demo-safe analysis, so demos remain usable without credentials.
+## Environment Variables
 
-## Render deployment
+- `VITE_API_URL`: frontend API base URL. Use `http://localhost:3001` locally; leave unset on Render so same-origin `/api` works.
+- `OPENAI_API_KEY`: optional server-side key for live OpenAI-enhanced agent reasoning.
+- `OPENAI_MODEL`: optional model name, for example `gpt-4-turbo`.
+- `GITHUB_TOKEN`: optional token for higher GitHub public API limits.
+- `PORT`: Render sets this automatically. Local default is `3001`.
 
-This repository includes a single-service [Render Blueprint](./render.yaml).
+Without OpenAI credentials, the app runs honest demo mode. If GitHub access is unavailable, it uses deterministic representative demo data and labels the result clearly as demo-safe.
+
+## Render Deployment
 
 1. Push `main` to GitHub.
 2. Open `https://dashboard.render.com/blueprint/new?repo=https://github.com/raghavacse2024-dotcom/codegenome-ai`.
-3. Set the optional secrets in Render: `GITHUB_TOKEN`, `OPENAI_API_KEY`, and `OPENAI_MODEL`.
-4. Apply the Blueprint. Render builds Vite, runs the Node service, and checks `/api/health`.
-
-## Three-minute demo
-
-- **0:00–0:15:** State the problem: teams lose time understanding unfamiliar, debt-heavy codebases.
-- **0:15–0:45:** Paste a public GitHub URL and show the five agents planning, handing off evidence, and self-reviewing.
-- **0:45–1:30:** Explain the architecture map, ranked debt hotspots, and business-cost estimate.
-- **1:30–2:30:** Open the generated module/test scaffolds, copy or download them, and point out that the planner writes code rather than only suggesting it.
-- **2:30–3:00:** Show the review verdict and explain the agentic loop: understand → plan → write → validate.
+3. Apply the included `render.yaml` Blueprint.
+4. Add optional secrets in Render: `OPENAI_API_KEY` and `GITHUB_TOKEN`.
+5. Confirm `/api/health` returns `status: "ok"`.
 
 ## Verification
 
@@ -50,4 +48,4 @@ npm test
 npm run build
 ```
 
-The test suite covers GitHub URL validation and ordered five-agent orchestration. The UI covers API failures, GitHub rate-limit guidance, a persistent local history, and an offline-safe fallback.
+The test suite covers URL validation, repository sampling, GitHub rate-limit archive fallback, demo-safe fallback, and ordered five-agent orchestration.

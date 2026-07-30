@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"node --watch server/index.js\"",
     "start": "node server/index.js",
-    "build": "vite build",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
+    "build:server": "node -e \"console.log('Server is Node.js, no build needed')\"",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
