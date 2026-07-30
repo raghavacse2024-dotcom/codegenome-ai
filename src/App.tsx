@@ -20,7 +20,11 @@ export default function App() {
   const currentEvents = useMemo(() => analysis?.events || [], [analysis])
   async function analyze(event?: FormEvent) {
     event?.preventDefault(); setLoading(true); setError(''); setAnalysis(null)
-    try { const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repositoryUrl: url }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error); setAnalysis(payload); const next = [url, ...history.filter((item) => item !== url)].slice(0, 5); setHistory(next); localStorage.setItem(historyKey, JSON.stringify(next)) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Analysis failed.') } finally { setLoading(false) }
+    try { const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repositoryUrl: url }) }); const text = await response.text(); let payload: { error?: string } & Analysis
+      try { payload = text ? JSON.parse(text) : {} } catch { throw new Error('Analysis service returned an invalid response. Restart the development server and retry.') }
+      if (!response.ok) throw new Error(payload.error || `Analysis failed with status ${response.status}.`)
+      if (!text) throw new Error('Analysis service returned an empty response. Restart the development server and retry.')
+      setAnalysis(payload); const next = [url, ...history.filter((item) => item !== url)].slice(0, 5); setHistory(next); localStorage.setItem(historyKey, JSON.stringify(next)) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Analysis failed.') } finally { setLoading(false) }
   }
   const qaAnswer = analysis && question ? `Based on the sampled repository, ${analysis.results.review.data.verdict.toLowerCase()} recommendations prioritize ${analysis.results.refactor.data.target}. ${analysis.results.debt.data.summary}` : ''
   return <main><header><div><p className="eyebrow">MULTI-AGENT CODING INTELLIGENCE</p><h1>Code<span>Genome</span> AI</h1></div><p className="header-copy">Turn unfamiliar repositories into an evidence-backed refactoring plan.</p></header>
