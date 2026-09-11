@@ -21,7 +21,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. The Node API runs at `http://localhost:3001`.
+Open the web URL printed by `npm run dev`. By default it is `http://localhost:5173`, and the Node API defaults to `http://localhost:3001`. If either port is busy, the dev launcher chooses the next available port and keeps the Vite proxy pointed at the matching API port.
 
 ## Environment Variables
 

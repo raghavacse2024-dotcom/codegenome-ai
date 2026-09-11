@@ -33,4 +33,7 @@ app.use(errorHandler)
 app.use(express.static(path.join(root, 'dist')))
 app.get('*', (_, response) => response.sendFile(path.join(root, 'dist', 'index.html')))
 
-app.listen(port, '0.0.0.0', () => console.log(`CodeGenome listening on ${port}`))
+app.listen(port, '0.0.0.0', () => console.log(`CodeGenome listening on ${port}`)).on('error', (error) => {
+  console.error('Failed to start server', error)
+  process.exit(1)
+})
