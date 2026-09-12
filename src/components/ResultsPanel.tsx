@@ -1,17 +1,216 @@
-import type { Analysis } from '../types'
+import { useState } from 'react'
+import type { CSSProperties } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Copy, Check, FileCode, Server, Activity, ArrowRight, ShieldCheck, Zap } from 'lucide-react'
+import type { Analysis, Scaffold } from '../types'
+import { useCountUp } from '../hooks/useCountUp'
 import { DemoModeBadge } from './DemoModeBadge'
 import { DownloadButton } from './DownloadButton'
 import { RepositoryQA } from './RepositoryQA'
 
-/**
- * Displays the completed analysis, generated scaffolds, download action, and Q&A.
- */
+function ScaffoldCard({ file, index }: { file: Scaffold; index: number }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(file.content)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <motion.article 
+      className={`code-card reveal${copied ? ' is-copied' : ''}`} 
+      style={{ '--i': index } as CSSProperties}
+      whileHover={{ y: -3, boxShadow: '0 24px 50px -30px rgba(0, 0, 0, .9)', borderColor: 'rgba(125, 243, 195, .35)' }}
+    >
+      <div className="code-head">
+        <span className="code-path"><FileCode size={12} style={{display: 'inline', marginRight: 6, verticalAlign: 'middle'}}/>{file.path}</span>
+        <button className="copy-button" type="button" onClick={copy}>
+          {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'COPIED' : 'COPY'}
+        </button>
+      </div>
+      <pre>{file.content}</pre>
+    </motion.article>
+  )
+}
+
 export function ResultsPanel({ analysis }: { analysis: Analysis }) {
   const { architecture, debt, cost, refactor, review } = analysis.results
-  return <><DemoModeBadge isDemo={analysis.isDemo} /><section className="metrics"><section className="card"><span>Debt score</span><strong>{debt.data.totalDebtScore}<small>/100</small></strong></section><section className="card"><span>Estimated annual drag</span><strong>${cost.data.annualCost.toLocaleString()}</strong></section><section className="card"><span>Refactor payback</span><strong>{cost.data.roiMonths} mo.</strong></section><section className="card"><span>Review status</span><strong className="verified">{review.data.verdict}</strong></section></section>
-    <section className="grid"><section className="card"><p className="eyebrow">ARCHITECTURE MAP</p><h2>{architecture.data.framework}</h2><p>{architecture.data.summary}</p><div className="tags">{architecture.data.layers.map((layer) => <span key={layer}>{layer}</span>)}</div>{architecture.data.violations.length > 0 && <ul>{architecture.data.violations.map((violation) => <li key={violation}>{violation}</li>)}</ul>}</section><section className="card"><p className="eyebrow">REPOSITORY FOOTPRINT</p><h2>{architecture.data.structure.sampledFileCount} files sampled</h2><p>{architecture.data.structure.rootDirectories.join(' / ') || 'Flat source structure'}</p><div className="tags">{architecture.data.structure.languages.map(([language, count]) => <span key={language}>{language} {count}</span>)}</div></section><section className="card"><p className="eyebrow">RISK & COST</p><h2>{cost.data.priority} priority</h2><p>{cost.data.assumption}</p><div className="bar"><i style={{ width: `${Math.min(100, debt.data.totalDebtScore)}%` }} /></div></section></section>
-    <section className="card"><div className="section-head"><div><p className="eyebrow">TECHNICAL DEBT</p><h2>Evidence, not guesswork</h2></div><span>{debt.data.summary}</span></div><div className="hotspots">{debt.data.hotspots.length ? debt.data.hotspots.map((hotspot) => <article key={hotspot.path}><div><strong>{hotspot.path}</strong><p>{hotspot.signals.join(' / ') || 'complexity signal'}</p></div><b>{hotspot.score}</b><span>{hotspot.lines} lines</span></article>) : <p className="empty-state">No major static-analysis hotspots in the sampled files.</p>}</div></section>
-    <section className="card"><div className="section-head"><div><p className="eyebrow">REFACTOR PLAN</p><h2>{refactor.data.pullRequestTitle}</h2></div><DownloadButton analysisId={analysis.analysisId} /></div><ol>{refactor.data.steps.map((step) => <li key={step}>{step}</li>)}</ol>{refactor.data.scaffolds.map((file) => <div className="code" key={file.path}><div><span>{file.path}</span><button onClick={() => navigator.clipboard.writeText(file.content)}>Copy</button></div><pre>{file.content}</pre></div>)}</section>
-    <section className="grid"><section className="card"><p className="eyebrow">SELF-REVIEW</p><h2>{review.data.verdict}</h2><ul>{review.data.checks.map((check) => <li key={check}>{check}</li>)}</ul>{review.data.caveat && <p className="caveat">{review.data.caveat}</p>}</section><section className="card"><p className="eyebrow">REPOSITORY Q&A</p><h2>Ask the completed analysis</h2><RepositoryQA analysisId={analysis.analysisId} /></section></section>
-  </>
+  const languages = architecture.data.structure.languages
+  const maxLanguage = Math.max(1, ...languages.map(([, count]) => count))
+
+  const debtScore = useCountUp(debt.data.totalDebtScore)
+  const annualCost = useCountUp(cost.data.annualCost, 1300)
+  const payback = useCountUp(cost.data.roiMonths, 900)
+  const risk = Math.min(100, Math.max(6, debt.data.totalDebtScore))
+
+  const staggerContainer = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: { staggerChildren: 0.1 }
+    }
+  }
+
+  const panelVariant = {
+    hidden: { opacity: 0, y: 15 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } }
+  }
+
+  return (
+    <motion.section 
+      className="report"
+      variants={staggerContainer}
+      initial="hidden"
+      animate="visible"
+    >
+      <DemoModeBadge isDemo={analysis.isDemo} />
+
+      <section className="score-row">
+        <motion.article className="score-card" variants={panelVariant}>
+          <span>Debt Score</span>
+          <strong>{debtScore}<small>/100</small></strong>
+          <p className="score-foot">{debt.data.summary}</p>
+        </motion.article>
+        <motion.article className="score-card" variants={panelVariant}>
+          <span>Annual Drag</span>
+          <strong>${annualCost.toLocaleString()}</strong>
+          <p className="score-foot">{cost.data.assumption}</p>
+        </motion.article>
+        <motion.article className="score-card" variants={panelVariant}>
+          <span>Payback Window</span>
+          <strong>{payback}<small>mo</small></strong>
+          <p className="score-foot">{cost.data.priority} priority refactor</p>
+        </motion.article>
+        <motion.article className="score-card score-card--verified" variants={panelVariant}>
+          <span>Review Verdict</span>
+          <strong>{review.data.verdict}</strong>
+          <p className="score-foot">{review.data.checks.length} self-review checks</p>
+        </motion.article>
+      </section>
+
+      <section className="report-grid">
+        <motion.article className="panel panel--wide" variants={panelVariant}>
+          <div className="panel-head">
+            <p className="eyebrow"><Server size={12} style={{display: 'inline', marginRight: 4, verticalAlign: 'middle'}}/> Architecture map</p>
+            <span className="panel-tag">{architecture.data.framework}</span>
+          </div>
+          <h2>{architecture.data.summary}</h2>
+          <div className="layer-row">
+            {architecture.data.layers.map((layer) => <span key={layer}>{layer}</span>)}
+          </div>
+          {architecture.data.violations.length > 0 && (
+            <ul className="checklist checklist--warn">
+              {architecture.data.violations.map((violation) => <li key={violation}>{violation}</li>)}
+            </ul>
+          )}
+        </motion.article>
+
+        <motion.article className="panel" variants={panelVariant}>
+          <div className="panel-head">
+            <p className="eyebrow"><Activity size={12} style={{display: 'inline', marginRight: 4, verticalAlign: 'middle'}}/> Footprint</p>
+            <span className="panel-tag">{architecture.data.structure.sampledFileCount} files</span>
+          </div>
+          <p className="panel-copy">{architecture.data.structure.rootDirectories.join(' / ') || 'Flat source structure'}</p>
+          <div className="language-list">
+            {languages.length ? languages.map(([language, count], index) => (
+              <div className="language-row" key={language} style={{ '--i': index, '--to': `${(count / maxLanguage) * 100}%` } as CSSProperties}>
+                <span>{language}</span>
+                <span className="language-bar" aria-hidden="true"><motion.i initial={{width: 0}} animate={{width: '100%'}} transition={{duration: 1, delay: 0.2 + (index * 0.1)}} /></span>
+                <b>{count}</b>
+              </div>
+            )) : <p className="empty-state">No language sample in this repository.</p>}
+          </div>
+        </motion.article>
+
+        <motion.article className="panel" variants={panelVariant}>
+          <div className="panel-head">
+            <p className="eyebrow"><Zap size={12} style={{display: 'inline', marginRight: 4, verticalAlign: 'middle'}}/> Risk &amp; cost</p>
+            <span className="panel-tag">{cost.data.priority}</span>
+          </div>
+          <p className="panel-copy">{cost.data.assumption}</p>
+          <div className="meter" style={{ '--to': `${risk}%` } as CSSProperties}>
+            <motion.i initial={{width: 0}} animate={{width: `${risk}%`}} transition={{duration: 1.3, delay: 0.35, ease: "easeOut"}} />
+            <span className="meter-scale" aria-hidden="true">0%<b>100%</b></span>
+          </div>
+        </motion.article>
+      </section>
+
+      <motion.section className="panel" variants={panelVariant}>
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Technical debt</p>
+            <h2>Evidence, not guesswork</h2>
+          </div>
+          <span className="panel-tag">{debt.data.summary}</span>
+        </div>
+        <div className="hotspot-table">
+          {debt.data.hotspots.length ? debt.data.hotspots.map((hotspot, index) => (
+            <motion.article 
+              className="hotspot-row" 
+              key={hotspot.path} 
+              style={{ '--i': index } as CSSProperties}
+              whileHover={{ x: 3, backgroundColor: 'rgba(125, 243, 195, .05)' }}
+            >
+              <div className="hotspot-path">
+                <strong>{hotspot.path}</strong>
+                <p>{hotspot.signals.join(' / ') || 'complexity signal'}</p>
+              </div>
+              <span className="hotspot-bar" aria-hidden="true"><motion.i initial={{width: 0}} animate={{width: `${Math.min(100, Math.max(4, hotspot.score))}%`}} transition={{duration: 0.9, delay: 0.25 + (index * 0.05)}} /></span>
+              <b className="hotspot-score">{hotspot.score}</b>
+              <span className="hotspot-meta">{hotspot.lines} lines</span>
+            </motion.article>
+          )) : <p className="empty-state">No major static-analysis hotspots in the sampled files.</p>}
+        </div>
+      </motion.section>
+
+      <motion.section className="panel" variants={panelVariant}>
+        <div className="panel-head action-head">
+          <div>
+            <p className="eyebrow">Refactor package</p>
+            <h2>{refactor.data.pullRequestTitle}</h2>
+          </div>
+          <DownloadButton analysisId={analysis.analysisId} />
+        </div>
+        <ol className="steps">
+          {refactor.data.steps.map((step, idx) => (
+            <motion.li 
+              key={step}
+              whileHover={{ x: 3, backgroundColor: 'rgba(15, 32, 48, .8)', borderColor: 'rgba(125, 243, 195, .3)' }}
+            >
+              {step}
+            </motion.li>
+          ))}
+        </ol>
+        <div className="code-grid">
+          {refactor.data.scaffolds.map((file, index) => <ScaffoldCard file={file} index={index} key={file.path} />)}
+        </div>
+      </motion.section>
+
+      <section className="report-grid">
+        <motion.article className="panel" variants={panelVariant}>
+          <div className="panel-head">
+            <p className="eyebrow"><ShieldCheck size={12} style={{display: 'inline', marginRight: 4, verticalAlign: 'middle'}}/> Self review</p>
+            <span className="panel-tag">{review.data.verdict}</span>
+          </div>
+          <ul className="checklist">
+            {review.data.checks.map((check) => <li key={check}>{check}</li>)}
+          </ul>
+          {review.data.caveat && <p className="caveat">{review.data.caveat}</p>}
+        </motion.article>
+
+        <motion.article className="panel" variants={panelVariant}>
+          <div className="panel-head">
+            <p className="eyebrow">Repository Q&amp;A</p>
+            <span className="panel-tag">Grounded</span>
+          </div>
+          <RepositoryQA analysisId={analysis.analysisId} />
+        </motion.article>
+      </section>
+    </motion.section>
+  )
 }
