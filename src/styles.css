@@ -1193,6 +1193,16 @@ ul, ol { margin: 0 }
   background: rgba(125, 243, 195, 0.1);
 }
 
+.home-hero-actions {
+  margin-bottom: 32px;
+}
+
+.home-hero-cta-btn {
+  padding: 15px 26px !important;
+  font-size: 14.5px !important;
+  border-radius: 10px !important;
+}
+
 .home-hero-stats {
   display: flex;
   align-items: center;
@@ -1283,7 +1293,7 @@ ul, ol { margin: 0 }
 
 .home-visual-body {
   position: relative;
-  padding: 24px 20px 32px;
+  padding: 24px 20px 24px;
 }
 
 .home-visual-stream {
@@ -1314,42 +1324,31 @@ ul, ol { margin: 0 }
   animation: dot-pulse 1.2s infinite;
 }
 
-.home-floating-badge {
-  position: absolute;
+.home-visual-badges-bar {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 10px 14px;
-  background: rgba(12, 26, 44, 0.92);
-  border: 1px solid rgba(125, 243, 195, 0.35);
-  border-radius: 12px;
-  box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(12px);
-  z-index: 2;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(140, 175, 210, 0.12);
 }
 
-.home-floating-badge strong {
-  display: block;
-  font-size: 12px;
-  color: var(--text);
+.home-inline-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  color: var(--neon);
+  font: 500 11px 'DM Mono', monospace;
+  background: rgba(125, 243, 195, 0.08);
+  border: 1px solid rgba(125, 243, 195, 0.3);
+  border-radius: 8px;
 }
 
-.home-floating-badge small {
-  display: block;
-  font-size: 10px;
-  color: var(--muted);
-  font-family: 'DM Mono', monospace;
-}
-
-.badge-1 {
-  top: -20px;
-  right: -15px;
-}
-
-.badge-2 {
-  bottom: -22px;
-  left: 20px;
-  border-color: rgba(91, 216, 255, 0.35);
+.home-inline-badge.badge-cyan {
+  color: var(--cyan);
+  background: rgba(91, 216, 255, 0.08);
+  border-color: rgba(91, 216, 255, 0.3);
 }
 
 /* Home Section Layouts */

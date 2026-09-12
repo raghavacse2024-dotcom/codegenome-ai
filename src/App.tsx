@@ -59,7 +59,7 @@ export default function App() {
 
   const handleLaunchCockpit = (repoUrl?: string) => {
     setView('cockpit')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    window.scrollTo(0, 0)
     if (repoUrl) {
       setUrl(repoUrl)
       analyze(repoUrl)
@@ -96,7 +96,7 @@ export default function App() {
         currentView={view}
         onSelectView={(v) => {
           setView(v)
-          window.scrollTo({ top: 0, behavior: 'smooth' })
+          window.scrollTo(0, 0)
         }}
         onLaunchCockpit={() => handleLaunchCockpit()}
       />
@@ -105,10 +105,10 @@ export default function App() {
         {view === 'home' ? (
           <motion.div
             key="home-page"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.35, ease: 'easeInOut' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'linear' }}
           >
             <HomePage onLaunchCockpit={handleLaunchCockpit} />
           </motion.div>
@@ -116,10 +116,10 @@ export default function App() {
           <motion.main 
             key="cockpit-page"
             className="shell"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.35, ease: 'easeInOut' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'linear' }}
           >
             <aside className="rail">
               <div className="rail-brand" onClick={() => setView('home')} style={{ cursor: 'pointer' }}>

@@ -12,14 +12,11 @@ import {
   Flame, 
   Download, 
   CheckCircle2, 
-  ArrowRight, 
   ChevronRight, 
-  Sparkles, 
   HelpCircle, 
   Activity, 
   FileCode, 
-  Play,
-  RotateCw
+  Play
 } from 'lucide-react'
 
 interface HomePageProps {
@@ -202,27 +199,20 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           animate="visible"
           variants={staggerContainer}
         >
-          {/* Eyebrow Pill */}
-          <motion.div variants={fadeInUp} custom={0} className="home-hero-pill">
-            <Sparkles className="w-3.5 h-3.5 text-neon" />
-            <span>Autonomous Multi-Agent Repository Intelligence</span>
-            <span className="home-hero-pill-badge">v2.0 Online</span>
-          </motion.div>
-
           {/* Headline */}
-          <motion.h1 variants={fadeInUp} custom={1} className="home-hero-title">
+          <motion.h1 variants={fadeInUp} custom={0} className="home-hero-title">
             Deconstruct Codebases. <br />
             <span className="home-hero-gradient-text">Eliminate Technical Debt</span> with CodeGenome AI.
           </motion.h1>
 
           {/* Subtitle */}
-          <motion.p variants={fadeInUp} custom={2} className="home-hero-subtitle">
+          <motion.p variants={fadeInUp} custom={1} className="home-hero-subtitle">
             Deploy a cooperative network of 5 specialized AI agents to map repository architecture, 
             price technical debt in developer hours, pinpoint fragility hotspots, and compile automated refactor scaffolds.
           </motion.p>
 
           {/* Action Button */}
-          <motion.div variants={fadeInUp} custom={3} className="home-hero-actions">
+          <motion.div variants={fadeInUp} custom={2} className="home-hero-actions">
             <button className="run-button home-hero-cta-btn" onClick={() => onLaunchCockpit()}>
               <Play className="w-4 h-4 fill-current" />
               <span>Launch Refactor Cockpit</span>
@@ -230,7 +220,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           </motion.div>
 
           {/* Stats Bar */}
-          <motion.div variants={fadeInUp} custom={4} className="home-hero-stats">
+          <motion.div variants={fadeInUp} custom={3} className="home-hero-stats">
             <div className="home-stat-item">
               <span className="home-stat-num">5 AI Agents</span>
               <span className="home-stat-label">Cooperative Mesh</span>
@@ -253,7 +243,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           </motion.div>
         </motion.div>
 
-        {/* Hero Interactive Terminal Mockup Visual */}
+        {/* Hero Terminal Mockup Visual */}
         <motion.div 
           className="home-hero-visual"
           initial={{ opacity: 0, scale: 0.94, y: 30 }}
@@ -288,30 +278,17 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
                 </div>
               </div>
 
-              {/* Floating Badges */}
-              <motion.div 
-                className="home-floating-badge badge-1"
-                animate={{ y: [-4, 6, -4] }}
-                transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
-              >
-                <Layers className="w-4 h-4 text-neon" />
-                <div>
-                  <strong>Module Map</strong>
-                  <small>Clean Layer Boundaries</small>
+              {/* Embedded Visual Badges */}
+              <div className="home-visual-badges-bar">
+                <div className="home-inline-badge">
+                  <Layers className="w-3.5 h-3.5 text-neon" />
+                  <span>Module Map: Clean Boundaries</span>
                 </div>
-              </motion.div>
-
-              <motion.div 
-                className="home-floating-badge badge-2"
-                animate={{ y: [6, -6, 6] }}
-                transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
-              >
-                <DollarSign className="w-4 h-4 text-cyan" />
-                <div>
-                  <strong>Debt Index: B+</strong>
-                  <small>$14,200 Estimated Cleanup</small>
+                <div className="home-inline-badge badge-cyan">
+                  <DollarSign className="w-3.5 h-3.5 text-cyan" />
+                  <span>Debt Index: B+ ($14,200)</span>
                 </div>
-              </motion.div>
+              </div>
             </div>
           </div>
         </motion.div>
@@ -332,7 +309,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           </span>
           <h2>What CodeGenome AI Does</h2>
           <p className="home-section-desc">
-            Hover over any flashcard to flip it and explore deep technical capabilities and telemetry insights.
+            A comprehensive suite of autonomous code intelligence and structural telemetry tools.
           </p>
         </motion.div>
 
@@ -361,10 +338,6 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
                   </div>
                   <h3>{feat.title}</h3>
                   <p>{feat.frontDesc}</p>
-                  <div className="home-flashcard-flip-hint">
-                    <RotateCw className="w-3.5 h-3.5 text-neon" />
-                    <span>Hover to Flip 3D</span>
-                  </div>
                 </div>
 
                 {/* Back Side */}
