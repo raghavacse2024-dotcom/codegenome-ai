@@ -19,9 +19,7 @@ import {
   Activity, 
   FileCode, 
   Play,
-  Share2,
-  Check,
-  Search
+  RotateCw
 } from 'lucide-react'
 
 interface HomePageProps {
@@ -29,14 +27,8 @@ interface HomePageProps {
 }
 
 export function HomePage({ onLaunchCockpit }: HomePageProps) {
-  const [inputUrl, setInputUrl] = useState('https://github.com/vercel/turbo')
   const [activeFaq, setActiveFaq] = useState<number | null>(0)
-  const [activeStep, setActiveStep] = useState(0)
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    onLaunchCockpit(inputUrl)
-  }
+  const [activeStep, setActiveStep] = useState<number | null>(null)
 
   // Motion animation variants
   const fadeInUp = {
@@ -56,51 +48,60 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
     }
   }
 
-  const cardHover = {
-    hover: { 
-      y: -8, 
-      scale: 1.02, 
-      boxShadow: '0 24px 48px -12px rgba(125, 243, 195, 0.25)',
-      transition: { duration: 0.3, ease: 'easeOut' }
-    }
-  }
-
   const features = [
     {
       icon: <Layers className="w-6 h-6 text-neon" />,
       title: "Architecture Genome Mapping",
-      description: "Automatically extracts system layers, module dependency trees, and cyclical graph bindings across your entire codebase.",
-      badge: "Structural Insight"
+      badge: "Structural Insight",
+      frontDesc: "Extracts system layers, module dependency trees, and cyclical graph bindings across your codebase.",
+      backTitle: "Genome & Layer Telemetry",
+      backDesc: "Analyzes AST call graphs to discover circular imports, orphaned modules, and layer boundary violations.",
+      stats: "100% Dependency Graph Coverage"
     },
     {
       icon: <DollarSign className="w-6 h-6 text-cyan" />,
       title: "Financial Technical Debt Index",
-      description: "Calculates estimated refactor cost in developer hours and financial currency, prioritizing high-risk architectural debt.",
-      badge: "Debt Valuation"
+      badge: "Debt Valuation",
+      frontDesc: "Calculates refactor cost in developer hours and financial currency, prioritizing high-risk debt.",
+      backTitle: "Financial Risk Engine",
+      backDesc: "Translates code complexity, duplication, and anti-patterns into monetary cleanup costs and effort estimates.",
+      stats: "Precise Dollar & Hour Metrics"
     },
     {
       icon: <Flame className="w-6 h-6 text-amber-400" />,
       title: "Hotspot & Fragility Telemetry",
-      description: "Identifies complex modules with high cyclomatic complexity, frequent churn, and elevated bug propagation risk.",
-      badge: "Risk Prevention"
+      badge: "Risk Prevention",
+      frontDesc: "Identifies complex modules with high cyclomatic complexity, churn, and elevated bug propagation risk.",
+      backTitle: "Fragility Scanner",
+      backDesc: "Ranks top risk files using churn algorithms and complexity scores to prevent production regressions.",
+      stats: "Automated Fragility Scoring"
     },
     {
       icon: <Code2 className="w-6 h-6 text-violet" />,
       title: "Automated Refactor Blueprint",
-      description: "Compiles complete, drop-in replacement code scaffolds with TypeScript types, docstrings, and performance optimizations.",
-      badge: "Code Generation"
+      badge: "Code Generation",
+      frontDesc: "Compiles complete, drop-in replacement code scaffolds with TypeScript types and docstrings.",
+      backTitle: "Clean Code Generator",
+      backDesc: "Outputs decoupled interfaces, optimized async functions, and unit testable architectural scaffolds.",
+      stats: "1-Click Download ZIP Scaffold"
     },
     {
       icon: <Cpu className="w-6 h-6 text-neon" />,
       title: "5-Agent Cooperative Mesh",
-      description: "Specialized AI agents work concurrently in an automated pipeline: Architecture, Tech Debt, Risk, Planner, & Reviewer.",
-      badge: "Multi-Agent AI"
+      badge: "Multi-Agent AI",
+      frontDesc: "Specialized AI agents work concurrently in an automated pipeline to diagnose and blueprint.",
+      backTitle: "Parallel Agent Mesh",
+      backDesc: "Architecture, Debt, Risk, Planner, and Review agents run parallel diagnostic workloads concurrently.",
+      stats: "5 Concurrent Execution Nodes"
     },
     {
       icon: <Terminal className="w-6 h-6 text-cyan" />,
       title: "Contextual Codebase Q&A",
-      description: "Ask natural language questions about architecture, design patterns, or refactor strategies grounded in code analysis.",
-      badge: "Live Telemetry"
+      badge: "Live Telemetry",
+      frontDesc: "Ask natural language questions about architecture, design patterns, or refactor strategies.",
+      backTitle: "Vector Grounded QA",
+      backDesc: "Query file structures, refactor strategies, or architectural bottlenecks with instant AI answers.",
+      stats: "Context-Aware AI Assistant"
     }
   ]
 
@@ -183,7 +184,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
     },
     {
       q: "Which repositories and languages are supported?",
-      a: "CodeGenome AI supports any public GitHub repository across popular modern languages including TypeScript, JavaScript, Python, Go, Rust, Java, C++, Python, PHP, Ruby, and HTML/CSS."
+      a: "CodeGenome AI supports any public GitHub repository across popular modern languages including TypeScript, JavaScript, Python, Go, Rust, Java, C++, PHP, Ruby, and HTML/CSS."
     },
     {
       q: "Can I download refactored code files?",
@@ -220,53 +221,13 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
             price technical debt in developer hours, pinpoint fragility hotspots, and compile automated refactor scaffolds.
           </motion.p>
 
-          {/* Hero Form / Quick Launch */}
-          <motion.form 
-            variants={fadeInUp} 
-            custom={3} 
-            onSubmit={handleSubmit}
-            className="home-hero-form"
-          >
-            <div className="home-hero-input-wrapper">
-              <GitBranch className="home-hero-input-icon" />
-              <input 
-                type="url" 
-                value={inputUrl}
-                onChange={(e) => setInputUrl(e.target.value)}
-                placeholder="https://github.com/owner/repository"
-                required
-                className="home-hero-input"
-              />
-              <button type="submit" className="home-hero-submit-btn">
-                <Play className="w-4 h-4 fill-current" />
-                <span>Launch Analysis</span>
-              </button>
-            </div>
-            <div className="home-hero-quick-links">
-              <span className="text-muted text-xs">Try demo:</span>
-              <button 
-                type="button" 
-                className="home-chip" 
-                onClick={() => { setInputUrl('https://github.com/vercel/turbo'); onLaunchCockpit('https://github.com/vercel/turbo'); }}
-              >
-                vercel/turbo
-              </button>
-              <button 
-                type="button" 
-                className="home-chip" 
-                onClick={() => { setInputUrl('https://github.com/facebook/react'); onLaunchCockpit('https://github.com/facebook/react'); }}
-              >
-                facebook/react
-              </button>
-              <button 
-                type="button" 
-                className="home-chip" 
-                onClick={() => { setInputUrl('https://github.com/tailwindlabs/tailwindcss'); onLaunchCockpit('https://github.com/tailwindlabs/tailwindcss'); }}
-              >
-                tailwindlabs/tailwindcss
-              </button>
-            </div>
-          </motion.form>
+          {/* Action Button */}
+          <motion.div variants={fadeInUp} custom={3} className="home-hero-actions">
+            <button className="run-button home-hero-cta-btn" onClick={() => onLaunchCockpit()}>
+              <Play className="w-4 h-4 fill-current" />
+              <span>Launch Refactor Cockpit</span>
+            </button>
+          </motion.div>
 
           {/* Stats Bar */}
           <motion.div variants={fadeInUp} custom={4} className="home-hero-stats">
@@ -327,7 +288,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
                 </div>
               </div>
 
-              {/* Floating Floating Badges */}
+              {/* Floating Badges */}
               <motion.div 
                 className="home-floating-badge badge-1"
                 animate={{ y: [-4, 6, -4] }}
@@ -356,7 +317,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
         </motion.div>
       </section>
 
-      {/* Section 1: What CodeGenome AI Is (Core Capabilities Grid) */}
+      {/* Section 1: What CodeGenome AI Is (Interactive 3D Flashcard Grid) */}
       <section className="home-section" id="capabilities">
         <motion.div 
           className="home-section-header"
@@ -371,8 +332,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           </span>
           <h2>What CodeGenome AI Does</h2>
           <p className="home-section-desc">
-            A comprehensive suite of autonomous code intelligence and structural telemetry tools 
-            engineered to make complex codebases readable, maintainable, and refactor-ready.
+            Hover over any flashcard to flip it and explore deep technical capabilities and telemetry insights.
           </p>
         </motion.div>
 
@@ -386,22 +346,40 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           {features.map((feat, idx) => (
             <motion.div 
               key={idx}
-              className="home-card"
+              className="home-flashcard"
               variants={fadeInUp}
-              whileHover="hover"
               custom={idx}
             >
-              <div className="home-card-header">
-                <div className="home-card-icon-box">
-                  {feat.icon}
+              <div className="home-flashcard-inner">
+                {/* Front Side */}
+                <div className="home-flashcard-front">
+                  <div className="home-card-header">
+                    <div className="home-card-icon-box">
+                      {feat.icon}
+                    </div>
+                    <span className="home-card-badge">{feat.badge}</span>
+                  </div>
+                  <h3>{feat.title}</h3>
+                  <p>{feat.frontDesc}</p>
+                  <div className="home-flashcard-flip-hint">
+                    <RotateCw className="w-3.5 h-3.5 text-neon" />
+                    <span>Hover to Flip 3D</span>
+                  </div>
                 </div>
-                <span className="home-card-badge">{feat.badge}</span>
-              </div>
-              <h3>{feat.title}</h3>
-              <p>{feat.description}</p>
-              <div className="home-card-foot">
-                <span>Explore Telemetry</span>
-                <ChevronRight className="w-4 h-4 text-neon" />
+
+                {/* Back Side */}
+                <div className="home-flashcard-back">
+                  <div className="home-card-header">
+                    <span className="eyebrow text-xs text-neon">{feat.badge}</span>
+                    <span className="home-card-badge border-cyan text-cyan">Telemetry</span>
+                  </div>
+                  <h4>{feat.backTitle}</h4>
+                  <p>{feat.backDesc}</p>
+                  <div className="home-flashcard-back-foot">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-neon" />
+                    <span>{feat.stats}</span>
+                  </div>
+                </div>
               </div>
             </motion.div>
           ))}
@@ -441,6 +419,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
               variants={fadeInUp}
               whileHover={{ y: -4 }}
               onMouseEnter={() => setActiveStep(idx)}
+              onMouseLeave={() => setActiveStep(null)}
               custom={idx}
             >
               <div className="home-step-num-col">
@@ -498,7 +477,6 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
                 <span className="home-agent-badge" style={{ borderColor: agent.color, color: agent.color }}>
                   Node 0{idx + 1}
                 </span>
-                <span className="home-agent-status">ONLINE</span>
               </div>
               <h4>{agent.name}</h4>
               <span className="home-agent-role">{agent.role}</span>
@@ -662,9 +640,6 @@ export function compileAST(node: ASTNode): Result {
             <div className="home-cta-buttons">
               <button className="run-button" onClick={() => onLaunchCockpit()}>
                 <Play className="w-4 h-4" /> Launch Refactor Cockpit
-              </button>
-              <button className="chip chip--accent" onClick={() => onLaunchCockpit('https://github.com/vercel/turbo')}>
-                Load Turbo Repo Demo
               </button>
             </div>
           </div>
