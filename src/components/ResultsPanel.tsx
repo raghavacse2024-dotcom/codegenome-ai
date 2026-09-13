@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Copy, Check, FileCode, Server, Activity, ArrowRight, ShieldCheck, Zap } from 'lucide-react'
-import type { Analysis, Scaffold } from '../types'
+import { Copy, Check, FileCode, Server, Activity, ArrowRight, ShieldCheck, Zap, Code2, Network, GitPullRequest, GitBranch, FileDiff as FileDiffIcon } from 'lucide-react'
+import type { Analysis, Scaffold, Hotspot } from '../types'
 import { useCountUp } from '../hooks/useCountUp'
 import { DemoModeBadge } from './DemoModeBadge'
 import { DownloadButton } from './DownloadButton'
 import { RepositoryQA } from './RepositoryQA'
+import { AstAnalysisDetailModal } from './AstAnalysisDetailModal'
+import { GitDiffViewer } from './GitDiffViewer'
+import { AutomatedPrModal } from './AutomatedPrModal'
 
 function ScaffoldCard({ file, index }: { file: Scaffold; index: number }) {
   const [copied, setCopied] = useState(false)
@@ -39,8 +42,21 @@ function ScaffoldCard({ file, index }: { file: Scaffold; index: number }) {
 }
 
 export function ResultsPanel({ analysis }: { analysis: Analysis }) {
+  const [selectedHotspot, setSelectedHotspot] = useState<Hotspot | null>(null)
+  const [prModalOpen, setPrModalOpen] = useState(false)
+  const [refactorTab, setRefactorTab] = useState<'diff' | 'scaffolds'>('diff')
   const { architecture, debt, cost, refactor, review } = analysis.results
-  const languages = architecture.data.structure.languages
+  const rawLanguages = (architecture.data.structure.languages || []) as any[]
+  const languages: [string, number][] = rawLanguages.map((item) => {
+    if (Array.isArray(item)) return [String(item[0]), Number(item[1]) || 0]
+    if (item && typeof item === 'object') {
+      if (item._arr && Array.isArray(item.items)) {
+        return [String(item.items[0]), Number(item.items[1]) || 0]
+      }
+      return [String(item.language || item.name || 'Other'), Number(item.count) || 0]
+    }
+    return [String(item), 1]
+  })
   const maxLanguage = Math.max(1, ...languages.map(([, count]) => count))
 
   const debtScore = useCountUp(debt.data.totalDebtScore)
@@ -58,7 +74,7 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
 
   const panelVariant = {
     hidden: { opacity: 0, y: 15 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } }
+    visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const } }
   }
 
   return (
@@ -143,26 +159,48 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
       <motion.section className="panel" variants={panelVariant}>
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Technical debt</p>
+            <p className="eyebrow"><Code2 size={12} style={{display: 'inline', marginRight: 4, verticalAlign: 'middle'}}/> Technical debt &amp; AST Analysis</p>
             <h2>Evidence, not guesswork</h2>
           </div>
-          <span className="panel-tag">{debt.data.summary}</span>
+          <div className="panel-head-badges">
+            {debt.data.astAnalyzedCount !== undefined && debt.data.astAnalyzedCount > 0 && (
+              <span className="ast-badge" title="Verified via TypeScript Abstract Syntax Tree engine">
+                <Zap size={11} style={{display: 'inline', marginRight: 4, verticalAlign: 'middle'}}/>
+                AST Engine: {debt.data.astAnalyzedCount} AST trees (avg v(G) = {debt.data.avgCyclomaticComplexity})
+              </span>
+            )}
+            <span className="panel-tag">{debt.data.summary}</span>
+          </div>
         </div>
         <div className="hotspot-table">
           {debt.data.hotspots.length ? debt.data.hotspots.map((hotspot, index) => (
             <motion.article 
-              className="hotspot-row" 
+              className="hotspot-row hotspot-row--interactive" 
               key={hotspot.path} 
               style={{ '--i': index } as CSSProperties}
-              whileHover={{ x: 3, backgroundColor: 'rgba(125, 243, 195, .05)' }}
+              whileHover={{ x: 3, backgroundColor: 'rgba(125, 243, 195, .06)' }}
+              onClick={() => setSelectedHotspot(hotspot)}
+              role="button"
+              tabIndex={0}
+              title="Click to view detailed Abstract Syntax Tree (AST) breakdown"
             >
               <div className="hotspot-path">
-                <strong>{hotspot.path}</strong>
+                <div className="hotspot-path-title">
+                  <strong>{hotspot.path}</strong>
+                  {hotspot.ast && (
+                    <span className="ast-pill">
+                      v(G) {hotspot.ast.cyclomaticComplexity} · {hotspot.ast.functionCount} fn{hotspot.ast.functionCount === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </div>
                 <p>{hotspot.signals.join(' / ') || 'complexity signal'}</p>
               </div>
               <span className="hotspot-bar" aria-hidden="true"><motion.i initial={{width: 0}} animate={{width: `${Math.min(100, Math.max(4, hotspot.score))}%`}} transition={{duration: 0.9, delay: 0.25 + (index * 0.05)}} /></span>
               <b className="hotspot-score">{hotspot.score}</b>
-              <span className="hotspot-meta">{hotspot.lines} lines</span>
+              <div className="hotspot-meta-col">
+                <span className="hotspot-meta">{hotspot.lines} lines</span>
+                <span className="ast-inspect-hint">Inspect AST &rarr;</span>
+              </div>
             </motion.article>
           )) : <p className="empty-state">No major static-analysis hotspots in the sampled files.</p>}
         </div>
@@ -174,7 +212,18 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
             <p className="eyebrow">Refactor package</p>
             <h2>{refactor.data.pullRequestTitle}</h2>
           </div>
-          <DownloadButton analysisId={analysis.analysisId} />
+          <div className="action-buttons-group">
+            <button
+              type="button"
+              className="pr-trigger-btn"
+              onClick={() => setPrModalOpen(true)}
+              title="Create automated Pull Request on GitHub"
+            >
+              <GitPullRequest size={13} style={{ marginRight: 6 }} />
+              Automate PR
+            </button>
+            <DownloadButton analysisId={analysis.analysisId} />
+          </div>
         </div>
         <ol className="steps">
           {refactor.data.steps.map((step, idx) => (
@@ -186,9 +235,43 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
             </motion.li>
           ))}
         </ol>
-        <div className="code-grid">
-          {refactor.data.scaffolds.map((file, index) => <ScaffoldCard file={file} index={index} key={file.path} />)}
+
+        {/* View Switcher: Git Diff vs Scaffold files */}
+        <div className="refactor-nav-tabs">
+          <button
+            type="button"
+            className={`refactor-tab-btn ${refactorTab === 'diff' ? 'is-active' : ''}`}
+            onClick={() => setRefactorTab('diff')}
+          >
+            <FileDiffIcon size={12} />
+            <span>Interactive Git Diff</span>
+            {refactor.data.diff && (
+              <span className="diff-pill diff-pill--add" style={{ marginLeft: 4, padding: '1px 5px', fontSize: 10 }}>
+                +{refactor.data.diff.summary.additions} / -{refactor.data.diff.summary.deletions}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={`refactor-tab-btn ${refactorTab === 'scaffolds' ? 'is-active' : ''}`}
+            onClick={() => setRefactorTab('scaffolds')}
+          >
+            <FileCode size={12} />
+            <span>Scaffold Files ({refactor.data.scaffolds.length})</span>
+          </button>
         </div>
+
+        {refactorTab === 'diff' && refactor.data.diff ? (
+          <GitDiffViewer
+            diff={refactor.data.diff}
+            analysisId={analysis.analysisId}
+            onOpenPrModal={() => setPrModalOpen(true)}
+          />
+        ) : (
+          <div className="code-grid">
+            {refactor.data.scaffolds.map((file, index) => <ScaffoldCard file={file} index={index} key={file.path} />)}
+          </div>
+        )}
       </motion.section>
 
       <section className="report-grid">
@@ -211,6 +294,24 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
           <RepositoryQA analysisId={analysis.analysisId} />
         </motion.article>
       </section>
+
+      <AnimatePresence>
+        {selectedHotspot && (
+          <AstAnalysisDetailModal
+            hotspot={selectedHotspot}
+            onClose={() => setSelectedHotspot(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {prModalOpen && (
+          <AutomatedPrModal
+            analysis={analysis}
+            onClose={() => setPrModalOpen(false)}
+          />
+        )}
+      </AnimatePresence>
     </motion.section>
   )
 }

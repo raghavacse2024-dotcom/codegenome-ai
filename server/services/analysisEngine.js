@@ -4,15 +4,27 @@ import { generateScaffolds } from './scaffoldGenerator.js'
 
 /**
  * Runs GitHub ingestion and all five CodeGenome agents with a hard timeout.
- * @param {string} repositoryUrl Public GitHub URL.
+ * @param {string} repositoryUrl GitHub URL (public or private).
+ * @param {string|null} token Optional personal access or OAuth token for private repositories.
+ * @param {((event: object) => void)|null} onProgress Optional real-time progress callback.
  * @returns {Promise<object>} Completed analysis with stable demo/live flags.
  */
-export async function analyzeRepository(repositoryUrl) {
+export async function analyzeRepository(repositoryUrl, token = null, onProgress = null) {
   const analysis = await withTimeout(async () => {
-    const repository = await fetchRepository(repositoryUrl)
-    const result = await runAnalysis(repository)
-    const generated = generateScaffolds(result.results.refactor.data)
+    if (typeof onProgress === 'function') {
+      onProgress({ agent: 'Ingestion', status: 'running', rationale: 'Fetching repository manifest and source trees from GitHub API...', at: new Date().toISOString() })
+    }
+    const repository = await fetchRepository(repositoryUrl, token)
+    if (typeof onProgress === 'function') {
+      onProgress({ agent: 'Ingestion', status: 'complete', rationale: `Sampled ${repository.files?.length || 0} source files. Initializing agent network.`, at: new Date().toISOString() })
+    }
+    const result = await runAnalysis(repository, onProgress)
+    const targetPath = result.results.refactor.data.target
+    const targetFile = repository.files?.find((f) => f.path === targetPath) || repository.files?.[0] || null
+    const generated = generateScaffolds(result.results.refactor.data, targetFile)
     result.results.refactor.data.scaffolds = generated.files
+    result.results.refactor.data.refactoredTarget = generated.refactoredTargetContent
+    result.results.refactor.data.diff = generated.diff
     return result
   }, 60_000)
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Terminal, 
@@ -13,27 +13,79 @@ import {
   Download, 
   CheckCircle2, 
   ChevronRight, 
-  HelpCircle, 
   Activity, 
   FileCode, 
-  Play
+  Play,
+  Plus,
+  ArrowRight,
+  Sparkles,
+  Lock,
+  GitPullRequest
 } from 'lucide-react'
+
+const EXAMPLE_REPOS = [
+  'https://github.com/raghavacse2024-dotcom/codegenome-ai',
+  'https://github.com/facebook/react',
+  'https://github.com/expressjs/express',
+  'https://github.com/vercel/next.js',
+  'https://github.com/tailwindlabs/tailwindcss',
+  'https://github.com/astral-sh/uv'
+]
 
 interface HomePageProps {
   onLaunchCockpit: (repoUrl?: string) => void
 }
 
 export function HomePage({ onLaunchCockpit }: HomePageProps) {
-  const [activeFaq, setActiveFaq] = useState<number | null>(0)
   const [activeStep, setActiveStep] = useState<number | null>(null)
+  const [ctaInput, setCtaInput] = useState('')
+  const [placeholderIndex, setPlaceholderIndex] = useState(0)
+  const [displayedPlaceholder, setDisplayedPlaceholder] = useState('')
+  const [isDeleting, setIsDeleting] = useState(false)
 
-  // Motion animation variants
+  // Smooth typewriter effect for running example GitHub links
+  useEffect(() => {
+    const currentFullText = EXAMPLE_REPOS[placeholderIndex]
+    let timer: NodeJS.Timeout
+
+    if (!isDeleting) {
+      if (displayedPlaceholder.length < currentFullText.length) {
+        timer = setTimeout(() => {
+          setDisplayedPlaceholder(currentFullText.slice(0, displayedPlaceholder.length + 1))
+        }, 40)
+      } else {
+        // Pause before deleting
+        timer = setTimeout(() => {
+          setIsDeleting(true)
+        }, 2200)
+      }
+    } else {
+      if (displayedPlaceholder.length > 0) {
+        timer = setTimeout(() => {
+          setDisplayedPlaceholder(currentFullText.slice(0, displayedPlaceholder.length - 1))
+        }, 20)
+      } else {
+        setIsDeleting(false)
+        setPlaceholderIndex((prev) => (prev + 1) % EXAMPLE_REPOS.length)
+      }
+    }
+
+    return () => clearTimeout(timer)
+  }, [displayedPlaceholder, isDeleting, placeholderIndex])
+
+  const handleCtaSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const targetUrl = ctaInput.trim() || EXAMPLE_REPOS[placeholderIndex]
+    onLaunchCockpit(targetUrl)
+  }
+
+  // Motion animation variants - streamlined for 60fps GPU smoothness
   const fadeInUp = {
-    hidden: { opacity: 0, y: 35 },
+    hidden: { opacity: 0, y: 14 },
     visible: (custom = 0) => ({
       opacity: 1,
       y: 0,
-      transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1], delay: custom * 0.1 }
+      transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] as const, delay: custom * 0.04 }
     })
   }
 
@@ -41,7 +93,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
-      transition: { staggerChildren: 0.12, delayChildren: 0.1 }
+      transition: { staggerChildren: 0.06, delayChildren: 0.02 }
     }
   }
 
@@ -89,7 +141,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
       frontDesc: "Specialized AI agents work concurrently in an automated pipeline to diagnose and blueprint.",
       backTitle: "Parallel Agent Mesh",
       backDesc: "Architecture, Debt, Risk, Planner, and Review agents run parallel diagnostic workloads concurrently.",
-      stats: "5 Concurrent Execution Nodes"
+      stats: "5 Concurrent AI Agents"
     },
     {
       icon: <Terminal className="w-6 h-6 text-cyan" />,
@@ -166,29 +218,6 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
     }
   ]
 
-  const faqs = [
-    {
-      q: "What is CodeGenome AI?",
-      a: "CodeGenome AI is an autonomous codebase intelligence platform powered by a multi-agent AI network. It scans repository source code, maps system architecture, prices technical debt, and generates automated refactoring blueprints."
-    },
-    {
-      q: "Does CodeGenome AI write changes to my repository?",
-      a: "No! CodeGenome AI operates strictly on a read-only scan protocol. It analyzes repository code and presents refactoring recommendations, code snippets, and downloadable ZIP scaffolds without modifying your original repository."
-    },
-    {
-      q: "How are the technical debt cost estimates calculated?",
-      a: "Our Technical Debt Agent analyzes cyclomatic complexity, code duplication, file coupling, and structural anti-patterns. It translates these metrics into estimated engineering effort hours and approximate financial cost based on standard industry developer rates."
-    },
-    {
-      q: "Which repositories and languages are supported?",
-      a: "CodeGenome AI supports any public GitHub repository across popular modern languages including TypeScript, JavaScript, Python, Go, Rust, Java, C++, PHP, Ruby, and HTML/CSS."
-    },
-    {
-      q: "Can I download refactored code files?",
-      a: "Yes! Once analysis is complete, you can review side-by-side refactored code and download a complete ZIP package containing the generated code blueprints and refactor instructions."
-    }
-  ]
-
   return (
     <div className="home-container">
       {/* Hero Section */}
@@ -248,7 +277,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           className="home-hero-visual"
           initial={{ opacity: 0, scale: 0.94, y: 30 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.8, delay: 0.3, ease: [0.22, 1, 0.36, 1] as const }}
         >
           <div className="home-visual-card">
             <div className="home-visual-header">
@@ -266,7 +295,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
 
             <div className="home-visual-body">
               <div className="home-visual-stream">
-                <p className="code-line text-muted">$ codegenome scan https://github.com/vercel/turbo</p>
+                <p className="code-line text-muted">$ codegenome scan https://github.com/raghavacse2024-dotcom/codegenome-ai</p>
                 <p className="code-line text-neon">[0.0s] Initializing 5 execution agents...</p>
                 <p className="code-line text-cyan">[1.2s] ArchitectureAgent: Mapped 4 modules, 18 dependency nodes</p>
                 <p className="code-line text-amber-300">[2.5s] TechnicalDebtAgent: Calculated debt index (Score 78/100 - $14,200)</p>
@@ -300,7 +329,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           className="home-section-header"
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-100px" }}
+          viewport={{ once: true, amount: 0.15 }}
           variants={fadeInUp}
         >
           <span className="eyebrow">
@@ -317,7 +346,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           className="home-grid-3"
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, amount: 0.1 }}
           variants={staggerContainer}
         >
           {features.map((feat, idx) => (
@@ -365,7 +394,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           className="home-section-header"
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-100px" }}
+          viewport={{ once: true, amount: 0.15 }}
           variants={fadeInUp}
         >
           <span className="eyebrow">
@@ -382,7 +411,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           className="home-pipeline-container"
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, amount: 0.1 }}
           variants={staggerContainer}
         >
           {workflowSteps.map((step, idx) => (
@@ -418,7 +447,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           className="home-section-header"
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-100px" }}
+          viewport={{ once: true, amount: 0.15 }}
           variants={fadeInUp}
         >
           <span className="eyebrow">
@@ -435,7 +464,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
           className="home-agent-grid"
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, amount: 0.1 }}
           variants={staggerContainer}
         >
           {agentNetwork.map((agent, idx) => (
@@ -443,14 +472,9 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
               key={idx}
               className="home-agent-card"
               variants={fadeInUp}
-              whileHover={{ scale: 1.03, translateY: -6 }}
+              whileHover={{ y: -4 }}
               custom={idx}
             >
-              <div className="home-agent-card-top">
-                <span className="home-agent-badge" style={{ borderColor: agent.color, color: agent.color }}>
-                  Node 0{idx + 1}
-                </span>
-              </div>
               <h4>{agent.name}</h4>
               <span className="home-agent-role">{agent.role}</span>
               <p>{agent.desc}</p>
@@ -546,55 +570,282 @@ export function compileAST(node: ASTNode): Result {
         </div>
       </section>
 
-      {/* Section 5: FAQs */}
-      <section className="home-section" id="faq">
+      {/* Section 5: Enterprise Infrastructure & Capabilities Bento Grid */}
+      <section className="home-section" id="infrastructure">
         <motion.div 
           className="home-section-header"
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-100px" }}
+          viewport={{ once: true, amount: 0.15 }}
           variants={fadeInUp}
         >
           <span className="eyebrow">
-            <HelpCircle className="w-3.5 h-3.5 inline mr-1" />
-            FREQUENTLY ASKED QUESTIONS
+            <Sparkles className="w-3.5 h-3.5 inline mr-1" />
+            PLATFORM ARCHITECTURE & INFRASTRUCTURE
           </span>
-          <h2>Everything You Need to Know</h2>
+          <h2>Engineered for Deep Codebase Intelligence</h2>
+          <p className="home-section-subtitle">
+            Autonomous multi-agent pipeline with AST graph indexing, sub-second impact resolution, and verified Git refactoring.
+          </p>
         </motion.div>
 
-        <div className="home-faq-list">
-          {faqs.map((faq, idx) => (
-            <motion.div 
-              key={idx}
-              className={`home-faq-item ${activeFaq === idx ? 'is-open' : ''}`}
-              initial="hidden"
-              whileInView="visible"
-              viewport={{ once: true }}
-              variants={fadeInUp}
-              custom={idx}
-            >
-              <button 
-                className="home-faq-question"
-                onClick={() => setActiveFaq(activeFaq === idx ? null : idx)}
-              >
-                <span>{faq.q}</span>
-                <ChevronRight className={`w-4 h-4 transform transition-transform ${activeFaq === idx ? 'rotate-90 text-neon' : 'text-muted'}`} />
-              </button>
-              <AnimatePresence>
-                {activeFaq === idx && (
-                  <motion.div 
-                    className="home-faq-answer"
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <p>{faq.a}</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          ))}
+        <div className="bento-grid-container">
+          {/* Card 1: Zero-Trust Security & Sandbox Isolation */}
+          <motion.div 
+            className="bento-tile bento-tile-auth"
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+            variants={fadeInUp}
+            custom={0}
+          >
+            <div className="bento-tile-header">
+              <h3 className="bento-tile-title">Zero-Trust Sandbox & Isolation</h3>
+            </div>
+
+            <div className="bento-schematic-wrapper">
+              <svg viewBox="0 0 320 150" className="bento-schematic-svg" preserveAspectRatio="xMidYMid meet">
+                {/* Sandbox Boundary */}
+                <rect x="15" y="15" width="290" height="120" rx="10" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.12)" strokeDasharray="4 4" />
+                <rect x="95" y="32" width="130" height="86" rx="8" fill="rgba(34,197,94,0.05)" stroke="rgba(34,197,94,0.3)" />
+                
+                {/* Ingestion stream */}
+                <path d="M 30,75 L 95,75" stroke="#9ca3af" strokeWidth="1.5" strokeDasharray="3 3" />
+                <circle cx="35" cy="75" r="4" fill="#6b7280" />
+                <path d="M 90,71 L 95,75 L 90,79" fill="none" stroke="#9ca3af" strokeWidth="1.5" />
+                <text x="35" y="62" fill="#9ca3af" fontSize="9" fontFamily="monospace">INGEST</text>
+
+                {/* Enclave Core Lock Icon */}
+                <rect x="145" y="62" width="30" height="24" rx="4" fill="#18181b" stroke="#22c55e" strokeWidth="1.5" />
+                <path d="M 152,62 V 54 C 152,49 168,49 168,54 V 62" fill="none" stroke="#22c55e" strokeWidth="1.5" />
+                <circle cx="160" cy="72" r="2.5" fill="#22c55e" />
+                <text x="160" y="102" textAnchor="middle" fill="#22c55e" fontSize="9.5" fontWeight="600" fontFamily="monospace">EPHEMERAL ENCLAVE</text>
+
+                {/* Output stream */}
+                <path d="M 225,75 L 285,75" stroke="#22c55e" strokeWidth="1.5" />
+                <circle cx="285" cy="75" r="4" fill="#22c55e" />
+                <path d="M 280,71 L 285,75 L 280,79" fill="none" stroke="#22c55e" strokeWidth="1.5" />
+                <text x="250" y="62" fill="#22c55e" fontSize="9" fontFamily="monospace">AST PASS</text>
+              </svg>
+            </div>
+
+            <div className="bento-tile-footer">
+              <p className="bento-tile-desc">
+                Read-only static AST ingestion, ephemeral test containers, and zero-exposure repository isolation.
+              </p>
+            </div>
+          </motion.div>
+
+          {/* Card 2: Infinite AST & Topology Graph */}
+          <motion.div 
+            className="bento-tile bento-tile-infinity"
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+            variants={fadeInUp}
+            custom={1}
+          >
+            <div className="bento-tile-header">
+              <h3 className="bento-tile-title">Infinite AST & Topology Graph</h3>
+            </div>
+
+            <div className="bento-schematic-wrapper">
+              <svg viewBox="0 0 540 150" className="bento-schematic-svg" preserveAspectRatio="xMidYMid meet">
+                {/* Background Grid Lines */}
+                <line x1="40" y1="75" x2="500" y2="75" stroke="rgba(255,255,255,0.05)" />
+                <line x1="270" y1="20" x2="270" y2="130" stroke="rgba(255,255,255,0.05)" />
+
+                {/* Root AST Node */}
+                <circle cx="70" cy="75" r="18" fill="#18181b" stroke="#22c55e" strokeWidth="2" />
+                <text x="70" y="79" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="700" fontFamily="monospace">ROOT</text>
+
+                {/* Connector branches */}
+                <path d="M 88,75 C 140,75 160,40 210,40" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1.5" />
+                <path d="M 88,75 L 210,75" fill="none" stroke="#22c55e" strokeWidth="1.5" />
+                <path d="M 88,75 C 140,75 160,110 210,110" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1.5" />
+
+                {/* Tier 1 Modules */}
+                <rect x="210" y="28" width="80" height="24" rx="4" fill="#18181b" stroke="rgba(255,255,255,0.3)" strokeWidth="1" />
+                <text x="250" y="44" textAnchor="middle" fill="#e4e4e7" fontSize="9.5" fontFamily="monospace">core/engine</text>
+
+                <rect x="210" y="63" width="80" height="24" rx="4" fill="#18181b" stroke="#22c55e" strokeWidth="1.5" />
+                <text x="250" y="79" textAnchor="middle" fill="#22c55e" fontSize="9.5" fontWeight="600" fontFamily="monospace">ast/graph</text>
+
+                <rect x="210" y="98" width="80" height="24" rx="4" fill="#18181b" stroke="rgba(255,255,255,0.3)" strokeWidth="1" />
+                <text x="250" y="114" textAnchor="middle" fill="#e4e4e7" fontSize="9.5" fontFamily="monospace">api/routes</text>
+
+                {/* Tier 2 Sub-Branches */}
+                <path d="M 290,40 L 370,30" fill="none" stroke="rgba(255,255,255,0.18)" strokeDasharray="3 3" />
+                <path d="M 290,40 L 370,52" fill="none" stroke="rgba(255,255,255,0.18)" strokeDasharray="3 3" />
+                <path d="M 290,75 L 370,75" fill="none" stroke="#22c55e" strokeWidth="1.5" />
+                <path d="M 290,110 L 370,100" fill="none" stroke="rgba(255,255,255,0.18)" strokeDasharray="3 3" />
+                <path d="M 290,110 L 370,122" fill="none" stroke="rgba(255,255,255,0.18)" strokeDasharray="3 3" />
+
+                {/* Leaf Nodes */}
+                <circle cx="370" cy="30" r="4" fill="#a1a1aa" />
+                <text x="382" y="33" fill="#a1a1aa" fontSize="8.5" fontFamily="monospace">Parser()</text>
+
+                <circle cx="370" cy="52" r="4" fill="#a1a1aa" />
+                <text x="382" y="55" fill="#a1a1aa" fontSize="8.5" fontFamily="monospace">Tokenizer()</text>
+
+                <rect x="370" y="64" width="90" height="22" rx="3" fill="#18181b" stroke="#22c55e" strokeWidth="1" />
+                <circle cx="380" cy="75" r="3" fill="#22c55e" />
+                <text x="424" y="79" textAnchor="middle" fill="#22c55e" fontSize="9" fontWeight="600" fontFamily="monospace">CyclicSafe: OK</text>
+
+                <circle cx="370" cy="100" r="4" fill="#a1a1aa" />
+                <text x="382" y="103" fill="#a1a1aa" fontSize="8.5" fontFamily="monospace">Handlers()</text>
+
+                <circle cx="370" cy="122" r="4" fill="#a1a1aa" />
+                <text x="382" y="125" fill="#a1a1aa" fontSize="8.5" fontFamily="monospace">Middleware()</text>
+              </svg>
+            </div>
+
+            <div className="bento-tile-footer">
+              <p className="bento-tile-desc">
+                Continuous full-codebase recursive AST graph mapping across 40+ languages with zero scale limits.
+              </p>
+            </div>
+          </motion.div>
+
+          {/* Card 3: Sub-Second Blast Radius Trajectory */}
+          <motion.div 
+            className="bento-tile bento-tile-enterprise"
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+            variants={fadeInUp}
+            custom={2}
+          >
+            <div className="bento-tile-header">
+              <h3 className="bento-tile-title">Blast Radius Engine</h3>
+            </div>
+
+            <div className="bento-schematic-wrapper">
+              <svg viewBox="0 0 320 150" className="bento-schematic-svg" preserveAspectRatio="xMidYMid meet">
+                {/* Concentric Impact Ripple Rings */}
+                <circle cx="110" cy="75" r="54" fill="none" stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+                <circle cx="110" cy="75" r="36" fill="rgba(34,197,94,0.04)" stroke="rgba(34,197,94,0.2)" />
+                <circle cx="110" cy="75" r="18" fill="rgba(34,197,94,0.12)" stroke="#22c55e" strokeWidth="1.5" />
+                
+                {/* Center Target Node */}
+                <circle cx="110" cy="75" r="5" fill="#22c55e" />
+                <text x="110" y="62" textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="700" fontFamily="monospace">Δ src/auth.ts</text>
+
+                {/* Trajectory Vector to downstream consumers */}
+                <path d="M 110,75 Q 180,45 250,55" fill="none" stroke="#22c55e" strokeWidth="2" />
+                <circle cx="250" cy="55" r="4" fill="#22c55e" />
+                <text x="250" y="44" textAnchor="middle" fill="#22c55e" fontSize="8.5" fontFamily="monospace">api/login.ts</text>
+
+                <path d="M 110,75 Q 170,105 240,95" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5" strokeDasharray="3 3" />
+                <circle cx="240" cy="95" r="3.5" fill="#a1a1aa" />
+                <text x="240" y="112" textAnchor="middle" fill="#a1a1aa" fontSize="8.5" fontFamily="monospace">middleware.ts</text>
+
+                {/* Metrics pill */}
+                <rect x="200" y="118" width="105" height="20" rx="3" fill="#18181b" stroke="rgba(255,255,255,0.15)" />
+                <text x="252" y="132" textAnchor="middle" fill="#ffffff" fontSize="8.5" fontFamily="monospace">0.18s Impact Calc</text>
+              </svg>
+            </div>
+
+            <div className="bento-tile-footer">
+              <p className="bento-tile-desc">
+                Predicts transitive breakages and ripple impact across thousands of imports in O(1) time.
+              </p>
+            </div>
+          </motion.div>
+
+          {/* Card 4: 100 Score Health & Clean Architecture */}
+          <motion.div 
+            className="bento-tile bento-tile-score"
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+            variants={fadeInUp}
+            custom={3}
+          >
+            <div className="bento-tile-header">
+              <h3 className="bento-tile-title">100/100 Code Health Index</h3>
+            </div>
+
+            <div className="bento-schematic-wrapper">
+              <svg viewBox="0 0 320 150" className="bento-schematic-svg" preserveAspectRatio="xMidYMid meet">
+                {/* Circular Gauge */}
+                <circle cx="100" cy="75" r="46" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="7" />
+                <circle cx="100" cy="75" r="46" fill="none" stroke="#22c55e" strokeWidth="7" strokeDasharray="289" strokeDashoffset="0" strokeLinecap="round" transform="rotate(-90 100 75)" />
+                
+                {/* Score Number in Center */}
+                <text x="100" y="81" textAnchor="middle" fill="#ffffff" fontSize="22" fontWeight="800" fontFamily="monospace">100</text>
+                <text x="100" y="96" textAnchor="middle" fill="#22c55e" fontSize="9" fontWeight="600" fontFamily="monospace">OPTIMAL</text>
+
+                {/* Health Metrics Breakdown on the right */}
+                <g transform="translate(170, 35)">
+                  <circle cx="5" cy="10" r="3" fill="#22c55e" />
+                  <text x="16" y="13" fill="#f4f4f5" fontSize="9.5" fontFamily="monospace">Anti-Patterns: 0</text>
+
+                  <circle cx="5" cy="32" r="3" fill="#22c55e" />
+                  <text x="16" y="35" fill="#f4f4f5" fontSize="9.5" fontFamily="monospace">Circular Deps: 0</text>
+
+                  <circle cx="5" cy="54" r="3" fill="#22c55e" />
+                  <text x="16" y="57" fill="#f4f4f5" fontSize="9.5" fontFamily="monospace">Test Coverage: 98%</text>
+
+                  <circle cx="5" cy="76" r="3" fill="#22c55e" />
+                  <text x="16" y="79" fill="#22c55e" fontSize="9.5" fontWeight="600" fontFamily="monospace">Grade: A+ Clean</text>
+                </g>
+              </svg>
+            </div>
+
+            <div className="bento-tile-footer">
+              <p className="bento-tile-desc">
+                Automated architectural smell elimination, dead-code removal, and complexity optimization.
+              </p>
+            </div>
+          </motion.div>
+
+          {/* Card 5: 1-Click PR / Refactor Dispatch */}
+          <motion.div 
+            className="bento-tile bento-tile-publish"
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+            variants={fadeInUp}
+            custom={4}
+          >
+            <div className="bento-tile-header">
+              <h3 className="bento-tile-title">1-Click Refactor PR</h3>
+            </div>
+
+            <div className="bento-schematic-wrapper">
+              <svg viewBox="0 0 320 150" className="bento-schematic-svg" preserveAspectRatio="xMidYMid meet">
+                {/* Main Branch Line */}
+                <line x1="25" y1="45" x2="295" y2="45" stroke="rgba(255,255,255,0.2)" strokeWidth="2" />
+                <circle cx="45" cy="45" r="4" fill="#a1a1aa" />
+                <text x="45" y="32" textAnchor="middle" fill="#71717a" fontSize="8" fontFamily="monospace">main</text>
+
+                {/* Feature Refactor Branch */}
+                <path d="M 80,45 C 105,45 115,95 140,95 L 220,95 C 245,95 255,45 280,45" fill="none" stroke="#22c55e" strokeWidth="2" />
+                
+                {/* Branch Commits */}
+                <circle cx="150" cy="95" r="4" fill="#22c55e" />
+                <text x="150" y="112" textAnchor="middle" fill="#a1a1aa" fontSize="8" fontFamily="monospace">ast:split</text>
+
+                <circle cx="205" cy="95" r="4" fill="#22c55e" />
+                <text x="205" y="112" textAnchor="middle" fill="#a1a1aa" fontSize="8" fontFamily="monospace">tests:pass</text>
+
+                {/* Merge Commit Target */}
+                <circle cx="280" cy="45" r="6" fill="#18181b" stroke="#22c55e" strokeWidth="2" />
+                <circle cx="280" cy="45" r="2.5" fill="#22c55e" />
+
+                {/* GitHub PR badge */}
+                <rect x="95" y="60" width="130" height="22" rx="3" fill="#18181b" stroke="#22c55e" strokeWidth="1" />
+                <text x="160" y="74" textAnchor="middle" fill="#22c55e" fontSize="9" fontWeight="600" fontFamily="monospace">PR #108: Auto-Merge OK</text>
+              </svg>
+            </div>
+
+            <div className="bento-tile-footer">
+              <p className="bento-tile-desc">
+                Autonomous agents draft branch fixes, run verification suites, and open verified GitHub Pull Requests.
+              </p>
+            </div>
+          </motion.div>
         </div>
       </section>
 
@@ -607,13 +858,52 @@ export function compileAST(node: ASTNode): Result {
           viewport={{ once: true }}
           variants={fadeInUp}
         >
-          <div className="home-cta-content">
-            <h2>Ready to Map & Refactor Your Codebase?</h2>
-            <p>Deploy the 5-agent network onto any public GitHub repository right now. 100% free, read-only scan protocol.</p>
-            <div className="home-cta-buttons">
-              <button className="run-button" onClick={() => onLaunchCockpit()}>
-                <Play className="w-4 h-4" /> Launch Refactor Cockpit
-              </button>
+          <div className="home-cta-grid">
+            {/* Left Column: Heading & Subtitle */}
+            <div className="home-cta-left">
+              <h2 className="home-cta-title">Ready to Map & Refactor Your Codebase?</h2>
+              <p className="home-cta-desc">
+                Deploy the 5-agent network onto any public GitHub repository. 100% free, read-only scan protocol.
+              </p>
+            </div>
+
+            {/* Right Column: Prompt Card with Running Example GitHub Links */}
+            <div className="home-cta-right">
+              <form className="home-cta-prompt-card" onSubmit={handleCtaSubmit}>
+                <div className="home-cta-input-area">
+                  <input
+                    type="text"
+                    className="home-cta-text-input"
+                    value={ctaInput}
+                    onChange={(e) => setCtaInput(e.target.value)}
+                    placeholder=""
+                    aria-label="GitHub Repository Link"
+                    spellCheck={false}
+                    autoComplete="off"
+                  />
+
+                  {/* Running example GitHub links in light background text */}
+                  {!ctaInput && (
+                    <div 
+                      className="home-cta-running-text-overlay"
+                      onClick={() => {
+                        const currentExample = EXAMPLE_REPOS[placeholderIndex]
+                        setCtaInput(currentExample)
+                      }}
+                    >
+                      <span className="home-cta-running-text">{displayedPlaceholder}</span>
+                      <span className="home-cta-cursor" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="home-cta-card-bottom flex justify-end">
+                  <button type="submit" className="home-cta-analyse-btn">
+                    <span>Analyse</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </motion.div>
@@ -621,22 +911,25 @@ export function compileAST(node: ASTNode): Result {
 
       {/* Footer */}
       <footer className="home-footer">
-        <div className="home-footer-inner">
+        <div className="home-footer-inner flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="home-footer-brand">
-            <div className="rail-brand">
-              <span className="mark">CG</span>
-              <span className="rail-name">
-                <b>CODEGENOME AI</b>
-                <small>Multi-Agent Telemetry Engine</small>
-              </span>
-            </div>
+            <span className="header-brand-tech-text text-lg">
+              CODEGENOMEAI
+            </span>
             <p className="text-xs text-muted mt-2">
               Autonomous multi-agent repository intelligence and refactor telemetry. Read-only scan protocol.
             </p>
           </div>
-          <div className="home-footer-status">
-            <span className="status-dot text-neon" />
-            <span className="text-xs font-mono text-muted">All 5 AI Agents Operational</span>
+          <div className="home-footer-links flex items-center gap-4">
+            <a
+              href="https://github.com/raghavacse2024-dotcom/codegenome-ai"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-muted hover:text-neon transition-colors flex items-center gap-1.5"
+            >
+              <GitBranch className="w-3.5 h-3.5 text-neon" />
+              <span>github.com/raghavacse2024-dotcom/codegenome-ai</span>
+            </a>
           </div>
         </div>
         <div className="home-footer-bottom">

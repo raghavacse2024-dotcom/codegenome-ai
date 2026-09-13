@@ -1,14 +1,20 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Terminal, Cpu, CheckSquare, AlertTriangle, Play, LayoutDashboard } from 'lucide-react'
+import { Terminal, Cpu, CheckSquare, AlertTriangle, Play, LayoutDashboard, Lock, Unlock } from 'lucide-react'
 import { useAnalysis } from './hooks/useAnalysis'
 import { useScrollSpy } from './hooks/useScrollSpy'
 import { ResultsPanel } from './components/ResultsPanel'
 import { HomePage } from './components/HomePage'
 import { HeaderNav } from './components/HeaderNav'
+import { GitHubAuthModal } from './components/GitHubAuthModal'
+import { RepoSelector } from './components/RepoSelector'
+import { PersistentHistoryDrawer } from './components/PersistentHistoryDrawer'
+import { getCurrentUser, logoutUser } from './services/apiService'
+import { useTheme } from './hooks/useTheme'
+import type { GitHubUser, Analysis } from './types'
 
-const demoUrl = 'https://github.com/vercel/turbo'
+const demoUrl = 'https://github.com/raghavacse2024-dotcom/codegenome-ai'
 const agents = ['Architecture', 'Technical Debt', 'Risk & Cost', 'Refactor Planner', 'Review']
 const historyKey = 'codegenome-history'
 const sections = [
@@ -18,12 +24,20 @@ const sections = [
 ]
 
 export default function App() {
+  useTheme()
   const [view, setView] = useState<'home' | 'cockpit'>('home')
   const [url, setUrl] = useState(demoUrl)
   const [history, setHistory] = useState<string[]>([])
   const [elapsed, setElapsed] = useState(0)
-  const { run, results: analysis, loading, error } = useAnalysis()
-  const currentEvents = useMemo(() => analysis?.events || [], [analysis])
+  const [user, setUser] = useState<GitHubUser | null>(null)
+  const [authModalOpen, setAuthModalOpen] = useState(false)
+  const { run, results: analysis, loading, error, setLoadedAnalysis, streamEvents, streamStatus } = useAnalysis()
+  const currentEvents = useMemo(() => {
+    if (loading && streamEvents.length > 0) {
+      return streamEvents
+    }
+    return analysis?.events || []
+  }, [loading, streamEvents, analysis])
   const activeSection = useScrollSpy(sections.map((section) => section.id))
 
   useEffect(() => {
@@ -32,6 +46,15 @@ export default function App() {
     } catch {
       setHistory([])
     }
+
+    // Check if user has an existing session
+    getCurrentUser()
+      .then((res) => {
+        if (res.authenticated && res.user) {
+          setUser(res.user)
+        }
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -79,7 +102,7 @@ export default function App() {
       y: 0,
       transition: { 
         duration: 0.6,
-        ease: [0.22, 1, 0.36, 1],
+        ease: [0.22, 1, 0.36, 1] as const,
         staggerChildren: 0.1
       }
     }
@@ -99,6 +122,18 @@ export default function App() {
           window.scrollTo(0, 0)
         }}
         onLaunchCockpit={() => handleLaunchCockpit()}
+        user={user}
+        onOpenAuth={() => setAuthModalOpen(true)}
+        onLogout={async () => {
+          await logoutUser()
+          setUser(null)
+        }}
+      />
+
+      <GitHubAuthModal 
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        onSuccess={(loggedUser) => setUser(loggedUser)}
       />
 
       <AnimatePresence mode="wait">
@@ -121,38 +156,6 @@ export default function App() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2, ease: 'linear' }}
           >
-            <aside className="rail">
-              <div className="rail-brand" onClick={() => setView('home')} style={{ cursor: 'pointer' }}>
-                <motion.span 
-                  className="mark" 
-                  aria-hidden="true"
-                  animate={{ rotate: [0, 90, 180, 270, 360] }}
-                  transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                  style={{ borderRadius: 0 }}
-                >
-                  CG
-                </motion.span>
-                <span className="rail-name">
-                  <b>CODEGENOME</b>
-                  <small>Refactor cockpit v2</small>
-                </span>
-              </div>
-
-              <nav className="rail-nav" aria-label="Workspace sections">
-                {sections.map((section, index) => (
-                  <a key={section.id} href={`#${section.id}`} aria-current={activeSection === section.id ? 'true' : undefined}>
-                    <span>{String(index + 1).padStart(2, '0')}</span>
-                    {section.label}
-                  </a>
-                ))}
-              </nav>
-
-              <div className="rail-note">
-                <Terminal size={14} color="var(--neon)" />
-                <p>Read-only scan protocol. No source writes executed.</p>
-              </div>
-            </aside>
-
             <section className="workspace">
               <header className="topbar">
                 <div className="topbar-copy">
@@ -166,7 +169,7 @@ export default function App() {
               </header>
 
               <motion.section 
-                className={`command-panel${loading ? ' is-busy' : ''}`} 
+                className={`command-panel command-panel-centered${loading ? ' is-busy' : ''}`} 
                 id="analyze"
                 variants={containerVariants}
                 initial="hidden"
@@ -176,14 +179,22 @@ export default function App() {
                   <p className="eyebrow"><Terminal size={12} style={{display: 'inline', marginRight: 4, verticalAlign: 'middle'}}/> SYS.INPUT</p>
                   <h2>Target GitHub repository.</h2>
                   <p className="command-lede">Deploy the agent network to map architecture, price technical debt, and compile a refactor scaffold.</p>
-                  <ul className="command-hints">
-                    <li>PUBLIC REPOS ONLY</li>
-                    <li>~60S EXECUTION</li>
-                  </ul>
+                  {!user && (
+                    <div className="command-auth-link">
+                      <button 
+                        type="button" 
+                        className="hint-auth-btn"
+                        onClick={() => setAuthModalOpen(true)}
+                        style={{ background: 'none', border: 'none', color: 'var(--neon)', cursor: 'pointer', padding: 0, font: 'inherit', textDecoration: 'underline', fontSize: '11px', fontFamily: 'DM Mono, monospace' }}
+                      >
+                        SIGN IN FOR PRIVATE REPOS
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <form className="repo-form" onSubmit={(e) => analyze(undefined, e)} aria-busy={loading || undefined}>
-                  <label htmlFor="repo">TARGET_URL</label>
+                  <label htmlFor="repo">TARGET_URL {user ? `(AUTHENTICATED AS @${user.login.toUpperCase()})` : ''}</label>
                   <div className="repo-input-row">
                     <input
                       id="repo"
@@ -202,6 +213,24 @@ export default function App() {
                     </button>
                   </div>
 
+                  {user && (
+                    <RepoSelector 
+                      currentUrl={url}
+                      onSelectRepo={(selectedUrl) => {
+                        setUrl(selectedUrl)
+                      }}
+                    />
+                  )}
+
+                  <PersistentHistoryDrawer 
+                    currentAnalysisId={analysis?.analysisId}
+                    onSelectAnalysis={(saved) => {
+                      setLoadedAnalysis(saved)
+                      if (saved.repo?.url) setUrl(saved.repo.url)
+                    }}
+                    onSelectUrl={(selectedUrl) => setUrl(selectedUrl)}
+                  />
+
                   <div className="quick-row">
                     <button type="button" className="chip chip--accent" onClick={() => analyze(demoUrl)}>Load Demo</button>
                     {history.map((item) => (
@@ -214,7 +243,10 @@ export default function App() {
                   {loading && (
                     <div className="scan">
                       <div className="scan-track"><motion.i initial={{width: 0}} animate={{width: `${progress}%`}} transition={{duration: 0.5}} /></div>
-                      <span>T+{elapsed}s · {completed}/{agents.length} nodes active</span>
+                      <span>
+                        T+{elapsed}s · {completed}/{agents.length} nodes active
+                        {streamStatus && <span style={{ marginLeft: 8, color: 'var(--neon)', opacity: 0.9 }}>· {streamStatus}</span>}
+                      </span>
                     </div>
                   )}
                 </form>
@@ -227,7 +259,7 @@ export default function App() {
                     <h2>Execution nodes</h2>
                   </div>
                   <span className="section-badge">
-                    {loading ? `SYNCING · ${completed}/${agents.length}` : analysis ? 'COMPLETED' : 'STANDBY'}
+                    {loading ? `STREAMING SSE · ${completed}/${agents.length}` : analysis ? 'COMPLETED' : 'STANDBY'}
                   </span>
                 </div>
 
@@ -240,9 +272,13 @@ export default function App() {
                   viewport={{ once: true }}
                 >
                   {agents.map((agent, index) => {
-                    const log = currentEvents.find((entry) => entry.agent === agent && entry.status === 'complete')
-                    const state = log ? 'is-done' : loading ? (index === completed ? 'is-active' : 'is-idle') : 'is-idle'
-                    const label = log ? 'DONE' : state === 'is-active' ? 'PROCESSING' : 'QUEUED'
+                    const completeLog = currentEvents.find((entry) => entry.agent === agent && entry.status === 'complete')
+                    const runningLog = currentEvents.find((entry) => entry.agent === agent && entry.status === 'running')
+                    const isDone = Boolean(completeLog)
+                    const isRunning = !isDone && (Boolean(runningLog) || (loading && index === completed))
+                    const state = isDone ? 'is-done' : isRunning ? 'is-active' : 'is-idle'
+                    const label = isDone ? 'DONE' : isRunning ? 'PROCESSING' : 'QUEUED'
+                    const note = completeLog?.rationale || runningLog?.rationale || (isRunning ? 'Compiling telemetry data...' : 'Awaiting signal.')
                     return (
                       <motion.article 
                         className={`agent-card ${state}`} 
@@ -252,13 +288,13 @@ export default function App() {
                         layout
                       >
                         <span className="agent-index" aria-hidden="true">
-                          {log ? <CheckSquare size={14}/> : String(index + 1).padStart(2, '0')}
+                          {isDone ? <CheckSquare size={14}/> : String(index + 1).padStart(2, '0')}
                         </span>
                         <strong className="agent-name">{agent}</strong>
                         <p className="agent-note">
-                          {log?.rationale || (state === 'is-active' ? 'Compiling telemetry data...' : 'Awaiting signal.')}
+                          {note}
                         </p>
-                        {state === 'is-active' && <span className="agent-skeleton" aria-hidden="true"><i /><i /></span>}
+                        {isRunning && <span className="agent-skeleton" aria-hidden="true"><i /><i /></span>}
                         <i className="agent-state">{label}</i>
                       </motion.article>
                     )

@@ -1,29 +1,151 @@
 import { randomUUID } from 'node:crypto'
+import { doc, setDoc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore'
+import { getServerFirestore } from './firestoreServer.js'
 
 const analyses = new Map()
-const TTL_MS = 1000 * 60 * 60
+const TTL_MS = 1000 * 60 * 60 * 24 // 24hr cache in memory
 
 /**
- * Stores a completed analysis in process memory for download and Q&A routes.
- * @param {object} analysis Completed analysis response.
- * @returns {object} Stored analysis with analysisId.
+ * Sanitizes an object before writing to Firestore.
+ * Firestore does not support nested arrays (arrays containing arrays directly)
+ * or undefined property values.
  */
-export function saveAnalysis(analysis) {
+export function prepareForFirestore(val, inArray = false) {
+  if (val === undefined) return null
+  if (val === null || typeof val !== 'object') return val
+  if (val instanceof Date) return val.toISOString()
+
+  if (Array.isArray(val)) {
+    const cleaned = val.map((item) => prepareForFirestore(item, true))
+    if (inArray) {
+      // Wrap nested array inside an object so Firestore accepts it
+      return { _arr: true, items: cleaned }
+    }
+    return cleaned
+  }
+
+  const result = {}
+  for (const [k, v] of Object.entries(val)) {
+    if (v === undefined) continue
+    result[k] = prepareForFirestore(v, false)
+  }
+  return result
+}
+
+/**
+ * Restores Firestore documents back to native JavaScript data structures.
+ * Unwraps { _arr: true, items: [...] } back to native arrays.
+ */
+export function restoreFromFirestore(val) {
+  if (val === null || val === undefined || typeof val !== 'object') return val
+
+  if (Array.isArray(val)) {
+    return val.map(restoreFromFirestore)
+  }
+
+  if (val._arr === true && Array.isArray(val.items)) {
+    return val.items.map(restoreFromFirestore)
+  }
+
+  const result = {}
+  for (const [k, v] of Object.entries(val)) {
+    result[k] = restoreFromFirestore(v)
+  }
+  return result
+}
+
+/**
+ * Stores a completed analysis in persistent Firestore database and local cache.
+ * @param {object} analysis Completed analysis response.
+ * @param {string | null} [userId] Optional authenticated user ID.
+ * @returns {Promise<object>} Stored analysis with analysisId.
+ */
+export async function saveAnalysis(analysis, userId = null) {
   const analysisId = randomUUID()
-  const record = { ...analysis, analysisId, createdAt: new Date().toISOString() }
+  const createdAt = new Date().toISOString()
+  const record = {
+    ...analysis,
+    analysisId,
+    createdAt,
+    userId: userId || null
+  }
+
+  // Always keep in local memory for fast synchronous responses
   analyses.set(analysisId, record)
+
+  // Persist to Cloud Firestore database asynchronously
+  try {
+    const db = getServerFirestore()
+    if (db) {
+      const docRef = doc(db, 'analyses', analysisId)
+      const firestoreData = prepareForFirestore(record)
+      await setDoc(docRef, firestoreData)
+      console.log(`[Firestore] Successfully persisted analysis ${analysisId} for ${analysis.repo?.owner}/${analysis.repo?.repository}`)
+    }
+  } catch (err) {
+    console.warn(`[Firestore] Failed to persist analysis ${analysisId}:`, err.message)
+  }
+
   return record
 }
 
 /**
- * Retrieves an analysis record by ID and expires old records opportunistically.
+ * Retrieves an analysis record by ID from memory or persistent Firestore.
  * @param {string} analysisId Analysis identifier returned by /api/analyze.
- * @returns {object | null} Stored analysis or null.
+ * @returns {Promise<object | null>} Stored analysis or null.
  */
-export function getAnalysis(analysisId) {
-  const now = Date.now()
-  for (const [id, record] of analyses.entries()) {
-    if (now - Date.parse(record.createdAt) > TTL_MS) analyses.delete(id)
+export async function getAnalysis(analysisId) {
+  if (!analysisId) return null
+
+  // 1. Check in-memory store first
+  if (analyses.has(analysisId)) {
+    return analyses.get(analysisId)
   }
-  return analyses.get(analysisId) || null
+
+  // 2. Fallback to Cloud Firestore
+  try {
+    const db = getServerFirestore()
+    if (db) {
+      const docRef = doc(db, 'analyses', analysisId)
+      const snap = await getDoc(docRef)
+      if (snap.exists()) {
+        const data = restoreFromFirestore(snap.data())
+        analyses.set(analysisId, data)
+        return data
+      }
+    }
+  } catch (err) {
+    console.warn(`[Firestore] Failed to fetch analysis ${analysisId}:`, err.message)
+  }
+
+  return null
+}
+
+/**
+ * Retrieves recent persisted analyses from Firestore database.
+ * @param {number} [maxCount=12] Max records to return.
+ * @returns {Promise<Array<object>>}
+ */
+export async function getRecentAnalyses(maxCount = 12) {
+  try {
+    const db = getServerFirestore()
+    if (db) {
+      const colRef = collection(db, 'analyses')
+      const q = query(colRef, orderBy('createdAt', 'desc'), limit(maxCount))
+      const snapshot = await getDocs(q)
+      const list = []
+      snapshot.forEach((d) => {
+        list.push(restoreFromFirestore(d.data()))
+      })
+      if (list.length > 0) return list
+    }
+  } catch (err) {
+    console.warn('[Firestore] Failed to query recent analyses:', err.message)
+  }
+
+  // Fallback to recent in-memory records
+  const memoryList = Array.from(analyses.values())
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, maxCount)
+  return memoryList
 }

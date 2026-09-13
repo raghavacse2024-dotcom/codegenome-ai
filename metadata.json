@@ -1,0 +1,6 @@
+{
+  "name": "CodeGenome AI",
+  "description": "Multi-agent repository intelligence network for code architecture analysis, technical debt pricing, and refactor scaffolds",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

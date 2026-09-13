@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function for analysis validation
+    function isValidAnalysis(data) {
+      return data.analysisId is string &&
+             data.analysisId.size() > 0 &&
+             data.analysisId.size() <= 128 &&
+             data.createdAt is string &&
+             data.repo is map &&
+             data.repo.owner is string &&
+             data.repo.repository is string;
+    }
+
+    match /analyses/{analysisId} {
+      // Anyone can read saved analyses
+      allow read: if true;
+      
+      // Allow create if analysisId matches and required fields are valid
+      allow create: if request.resource.data.analysisId == analysisId &&
+                       isValidAnalysis(request.resource.data);
+
+      // Analyses are immutable once generated (read-only snapshots)
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Default deny for all other paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

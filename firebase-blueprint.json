@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "analysis": {
+      "title": "Analysis Record",
+      "description": "Persistent repository intelligence report containing multi-agent results, debt metrics, and refactor blueprints.",
+      "type": "object",
+      "properties": {
+        "analysisId": { "type": "string" },
+        "repo": {
+          "type": "object",
+          "properties": {
+            "owner": { "type": "string" },
+            "repository": { "type": "string" },
+            "url": { "type": "string" },
+            "description": { "type": "string" },
+            "stars": { "type": "number" },
+            "defaultBranch": { "type": "string" }
+          },
+          "required": ["owner", "repository", "url"]
+        },
+        "source": { "type": "string", "enum": ["live", "demo-safe"] },
+        "isDemo": { "type": "boolean" },
+        "results": { "type": "object" },
+        "events": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["analysisId", "repo", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/analyses/{analysisId}": {
+      "schema": "analysis",
+      "description": "Global and user analyses persisted for durable access, history, and sharing."
+    }
+  }
+}

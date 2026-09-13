@@ -72,31 +72,24 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
       <AnimatePresence>
         {answer ? (
           <motion.div 
-            className="qa-answer"
+            className="qa-answer-card"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            style={{
-              background: 'rgba(5, 12, 22, 0.9)',
-              border: '1px solid rgba(125, 243, 195, 0.3)',
-              borderRadius: '4px',
-              padding: '14px',
-              marginTop: '14px'
-            }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', color: 'var(--neon)', font: '500 11px "DM Mono", monospace' }}>
+            <div className="qa-response-tag">
               <Terminal size={12} />
               <span>SYS.RESPONSE</span>
             </div>
-            <p style={{ margin: 0, fontSize: '13px', lineHeight: '1.6', color: '#e8f1fb' }}>{answer.answer}</p>
-            <div className="qa-meta" style={{ marginTop: '12px', paddingTop: '8px', borderTop: '1px dashed var(--line)', display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted)', fontFamily: '"DM Mono", monospace' }}>
+            <p className="qa-response-text">{answer.answer}</p>
+            <div className="qa-meta">
               <span>CONFIDENCE: {Math.round(answer.confidence * 100)}%</span>
               {answer.sourceFiles.length > 0 && <span>SOURCES: {answer.sourceFiles.join(', ')}</span>}
             </div>
           </motion.div>
         ) : (
           !loading && (
-            <p className="qa-hint" style={{ marginTop: '10px', fontSize: '11.5px', color: 'var(--muted)', fontFamily: '"DM Mono", monospace' }}>
+            <p className="qa-hint">
               <HelpCircle size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
               Ready for grounded repository inquiries.
             </p>
