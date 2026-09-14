@@ -16,7 +16,6 @@ import type { GitHubUser, Analysis } from './types'
 
 const demoUrl = 'https://github.com/raghavacse2024-dotcom/codegenome-ai'
 const agents = ['Architecture', 'Technical Debt', 'Risk & Cost', 'Refactor Planner', 'Review']
-const historyKey = 'codegenome-history'
 const sections = [
   { id: 'analyze', label: 'Command Prompt' },
   { id: 'workflow', label: 'Multi-Agent Network' },
@@ -26,10 +25,16 @@ const sections = [
 export default function App() {
   useTheme()
   const [view, setView] = useState<'home' | 'cockpit'>('home')
-  const [url, setUrl] = useState(demoUrl)
-  const [history, setHistory] = useState<string[]>([])
+  const [url, setUrl] = useState('')
   const [elapsed, setElapsed] = useState(0)
-  const [user, setUser] = useState<GitHubUser | null>(null)
+  const [user, setUser] = useState<GitHubUser | null>(() => {
+    try {
+      const cached = localStorage.getItem('codegenome_github_user')
+      return cached ? JSON.parse(cached) : null
+    } catch {
+      return null
+    }
+  })
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const { run, results: analysis, loading, error, setLoadedAnalysis, streamEvents, streamStatus } = useAnalysis()
   const currentEvents = useMemo(() => {
@@ -41,12 +46,18 @@ export default function App() {
   const activeSection = useScrollSpy(sections.map((section) => section.id))
 
   useEffect(() => {
-    try {
-      setHistory(JSON.parse(localStorage.getItem(historyKey) || '[]'))
-    } catch {
-      setHistory([])
+    if (user) {
+      try {
+        localStorage.setItem('codegenome_github_user', JSON.stringify(user))
+      } catch {}
+    } else {
+      try {
+        localStorage.removeItem('codegenome_github_user')
+      } catch {}
     }
+  }, [user])
 
+  useEffect(() => {
     // Check if user has an existing session
     getCurrentUser()
       .then((res) => {
@@ -72,9 +83,6 @@ export default function App() {
     }
     try {
       await run(urlToRun)
-      const next = [urlToRun, ...history.filter((item) => item !== urlToRun)].slice(0, 5)
-      setHistory(next)
-      localStorage.setItem(historyKey, JSON.stringify(next))
     } catch {
       // The hook owns the user-facing error message.
     }
@@ -160,11 +168,7 @@ export default function App() {
               <header className="topbar">
                 <div className="topbar-copy">
                   <p className="eyebrow"><LayoutDashboard size={12} style={{display: 'inline', marginRight: 4, verticalAlign: 'middle'}}/> Multi-agent telemetry</p>
-                  <h1>Initialize repository intelligence network.</h1>
-                </div>
-                <div className={`status-pill ${statusTone}`} role="status" aria-live="polite">
-                  <span className="status-dot" aria-hidden="true" />
-                  {status}
+                  <h1 style={{ color: 'var(--text-main, #ffffff)', opacity: 1, fontWeight: 700 }}>Initialize repository intelligence network.</h1>
                 </div>
               </header>
 
@@ -222,24 +226,6 @@ export default function App() {
                     />
                   )}
 
-                  <PersistentHistoryDrawer 
-                    currentAnalysisId={analysis?.analysisId}
-                    onSelectAnalysis={(saved) => {
-                      setLoadedAnalysis(saved)
-                      if (saved.repo?.url) setUrl(saved.repo.url)
-                    }}
-                    onSelectUrl={(selectedUrl) => setUrl(selectedUrl)}
-                  />
-
-                  <div className="quick-row">
-                    <button type="button" className="chip chip--accent" onClick={() => analyze(demoUrl)}>Load Demo</button>
-                    {history.map((item) => (
-                      <button type="button" className="chip" key={item} onClick={() => analyze(item)}>
-                        {item.replace('https://github.com/', '')}
-                      </button>
-                    ))}
-                  </div>
-
                   {loading && (
                     <div className="scan">
                       <div className="scan-track"><motion.i initial={{width: 0}} animate={{width: `${progress}%`}} transition={{duration: 0.5}} /></div>
@@ -251,6 +237,21 @@ export default function App() {
                   )}
                 </form>
               </motion.section>
+
+              <div className="database-scans-section" style={{ marginTop: '24px', marginBottom: '24px', padding: '20px', background: 'var(--card-bg, rgba(20, 20, 30, 0.6))', borderRadius: '14px', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+                <div style={{ marginBottom: '12px' }}>
+                  <p className="eyebrow" style={{ fontSize: '11px', letterSpacing: '0.05em', color: 'var(--neon)', textTransform: 'uppercase', marginBottom: '4px' }}>PERSISTENT STORAGE</p>
+                  <h3 style={{ fontSize: '16px', fontWeight: '600', margin: 0 }}>Cloud Firestore Scans & Database Records</h3>
+                </div>
+                <PersistentHistoryDrawer 
+                  currentAnalysisId={analysis?.analysisId}
+                  onSelectAnalysis={(saved) => {
+                    setLoadedAnalysis(saved)
+                    if (saved.repo?.url) setUrl(saved.repo.url)
+                  }}
+                  onSelectUrl={(selectedUrl) => setUrl(selectedUrl)}
+                />
+              </div>
 
               <section className="workflow-board" id="workflow">
                 <div className="section-title">

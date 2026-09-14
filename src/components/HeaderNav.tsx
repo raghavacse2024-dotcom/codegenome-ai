@@ -82,33 +82,6 @@ export function HeaderNav({ currentView, onSelectView, user, onOpenAuth, onLogou
 
         {/* Header Actions */}
         <div className="header-actions">
-          {/* GitHub Repository Link */}
-          <a
-            href="https://github.com/raghavacse2024-dotcom/codegenome-ai"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="header-github-repo-link"
-            title="View Codebase on GitHub"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontSize: '12px',
-              fontFamily: 'DM Mono, monospace',
-              color: 'var(--text-muted, #94a3b8)',
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid var(--border, rgba(255, 255, 255, 0.1))',
-              textDecoration: 'none',
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <GitBranch className="w-3.5 h-3.5 text-neon" />
-            <span className="hidden sm:inline">GitHub Repo</span>
-            <ExternalLink className="w-3 h-3 opacity-60" />
-          </a>
-
           {/* Design Theme Selector */}
           <ThemeToggle />
 

@@ -142,14 +142,21 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
     }
     return result
   } catch (error) {
-    if (error?.status === 403 || error?.status === 401 || error?.status === 404) {
+    console.warn('[GitHub] Primary API fetch failed, attempting archive or demo fallback:', error.message)
+    try {
       const archiveResult = await fetchRepositoryArchive(owner, repository, tokenForReq)
       if (!isTesting) {
         repositoryCache.set(cacheKey, { timestamp: Date.now(), data: archiveResult })
       }
       return archiveResult
+    } catch (archiveErr) {
+      console.warn('[GitHub] Archive fallback also failed:', archiveErr.message)
     }
-    return fallbackRepository(owner, repository, error?.message || 'GitHub fetch unavailable')
+    const demoResult = fallbackRepository(owner, repository, error?.message || 'GitHub fetch unavailable')
+    if (!isTesting) {
+      repositoryCache.set(cacheKey, { timestamp: Date.now(), data: demoResult })
+    }
+    return demoResult
   }
 }
 

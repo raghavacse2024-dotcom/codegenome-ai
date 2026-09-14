@@ -67,8 +67,8 @@ ${JSON.stringify(deterministic)}`
       const response = await Promise.race([callPromise, timeoutPromise])
       const enhanced = JSON.parse(response.text)
       return { data: { ...deterministic, ...enhanced }, source: 'gemini' }
-    } catch {
-      // Continue to OpenAI or fallback
+    } catch (err) {
+      console.warn(`[Agents] Gemini enhancement skipped for ${name} due to rate-limit/quota/network:`, err.message)
     }
   }
 
@@ -84,8 +84,8 @@ ${JSON.stringify(deterministic)}`
       const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3500))
       const response = await Promise.race([callPromise, timeoutPromise])
       return { data: { ...deterministic, ...JSON.parse(response.output_text) }, source: 'openai' }
-    } catch {
-      return { data: deterministic, source: 'fallback' }
+    } catch (err) {
+      console.warn(`[Agents] OpenAI enhancement skipped for ${name}:`, err.message)
     }
   }
 

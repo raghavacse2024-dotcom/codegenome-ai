@@ -294,8 +294,9 @@ ul, ol { margin: 0 }
   display: grid;
   grid-template-columns: 1fr 1.12fr;
   gap: 32px;
-  max-width: 960px;
-  margin: 0 auto 36px;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 36px;
   padding: 30px;
   background: rgba(14, 14, 16, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.08);
