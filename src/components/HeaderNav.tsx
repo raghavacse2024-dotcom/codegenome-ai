@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { GitBranch, LogOut, ExternalLink } from 'lucide-react'
 import type { GitHubUser } from '../types'
 import { ThemeToggle } from './ThemeToggle'
@@ -14,13 +15,19 @@ interface HeaderNavProps {
 
 export function HeaderNav({ currentView, onSelectView, user, onOpenAuth, onLogout }: HeaderNavProps) {
   const [scrolled, setScrolled] = useState(false)
-  const [activeSection, setActiveSection] = useState<'capabilities' | 'how-it-works' | 'agent-network' | 'infrastructure'>('capabilities')
+  const [activeSection, setActiveSection] = useState<string | null>(null)
 
   useEffect(() => {
     const sectionIds = ['capabilities', 'how-it-works', 'agent-network', 'infrastructure']
 
     const handleScroll = () => {
       setScrolled(window.scrollY > 20)
+
+      // When at the top of the home page, clear active section highlight
+      if (window.scrollY < 200) {
+        setActiveSection(null)
+        return
+      }
 
       const scrollPosition = window.scrollY + 180
 
@@ -30,7 +37,7 @@ export function HeaderNav({ currentView, onSelectView, user, onOpenAuth, onLogou
         if (element) {
           const top = element.offsetTop
           if (scrollPosition >= top) {
-            setActiveSection(sectionId as any)
+            setActiveSection(sectionId)
             return
           }
         }
@@ -52,33 +59,43 @@ export function HeaderNav({ currentView, onSelectView, user, onOpenAuth, onLogou
           </span>
         </button>
 
-        {/* Navigation Links */}
-        <nav className="header-links">
-          <a 
-            href="#capabilities" 
-            className={`header-link ${activeSection === 'capabilities' ? 'is-active' : ''}`}
-          >
-            Capabilities
-          </a>
-          <a 
-            href="#how-it-works" 
-            className={`header-link ${activeSection === 'how-it-works' ? 'is-active' : ''}`}
-          >
-            How It Works
-          </a>
-          <a 
-            href="#agent-network" 
-            className={`header-link ${activeSection === 'agent-network' ? 'is-active' : ''}`}
-          >
-            Agent Network
-          </a>
-          <a 
-            href="#infrastructure" 
-            className={`header-link ${activeSection === 'infrastructure' ? 'is-active' : ''}`}
-          >
-            Infrastructure
-          </a>
-        </nav>
+        {/* Navigation Links - Fade animation and conditional display */}
+        <AnimatePresence mode="wait">
+          {currentView === 'home' && (
+            <motion.nav 
+              className="header-links"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.3, ease: 'easeInOut' }}
+            >
+              <a 
+                href="#capabilities" 
+                className={`header-link ${activeSection === 'capabilities' ? 'is-active' : ''}`}
+              >
+                Capabilities
+              </a>
+              <a 
+                href="#how-it-works" 
+                className={`header-link ${activeSection === 'how-it-works' ? 'is-active' : ''}`}
+              >
+                How It Works
+              </a>
+              <a 
+                href="#agent-network" 
+                className={`header-link ${activeSection === 'agent-network' ? 'is-active' : ''}`}
+              >
+                Agent Network
+              </a>
+              <a 
+                href="#infrastructure" 
+                className={`header-link ${activeSection === 'infrastructure' ? 'is-active' : ''}`}
+              >
+                Infrastructure
+              </a>
+            </motion.nav>
+          )}
+        </AnimatePresence>
 
         {/* Header Actions */}
         <div className="header-actions">

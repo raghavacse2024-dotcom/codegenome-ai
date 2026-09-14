@@ -127,7 +127,7 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
                 <h2 style="margin:0; color: #ffffff; font-size: 20px;">Connect Google & GitHub</h2>
                 <p style="color: #94a3b8; font-size: 13px; margin-top: 8px; line-height: 1.5;">Enter your Google or GitHub account username to authorize your session.</p>
                 <label for="userinput">GOOGLE / GITHUB ACCOUNT</label>
-                <input type="text" id="userinput" placeholder="e.g. raghavacse2024-dotcom" value="raghavacse2024-dotcom" />
+                <input type="text" id="userinput" placeholder="e.g. octocat or your GitHub username" value="" />
                 <button class="btn" onclick="authenticate()">Authorize & Connect Account</button>
               </div>
               <script>
