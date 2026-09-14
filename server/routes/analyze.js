@@ -16,10 +16,8 @@ analyzeRouter.post('/analyze', async (request, response, next) => {
     const authHeader = request.headers.authorization
     if (authHeader?.startsWith('Bearer ')) {
       const raw = authHeader.slice(7).trim()
-      userToken = raw.startsWith('cg_') ? getStoredToken(raw) : raw
-      if (raw.startsWith('cg_')) {
-        userId = raw
-      }
+      userId = raw.startsWith('cg_') ? raw : null
+      userToken = raw.startsWith('cg_') ? (getStoredToken(raw) || raw) : raw
     }
 
     const analyzedData = await analyzeRepository(repositoryUrl, userToken)
@@ -71,10 +69,8 @@ async function handleAnalyzeStream(request, response, next) {
       : (typeof request.query.token === 'string' ? request.query.token.trim() : null)
 
     if (tokenCandidate) {
-      userToken = tokenCandidate.startsWith('cg_') ? getStoredToken(tokenCandidate) : tokenCandidate
-      if (tokenCandidate.startsWith('cg_')) {
-        userId = tokenCandidate
-      }
+      userId = tokenCandidate.startsWith('cg_') ? tokenCandidate : null
+      userToken = tokenCandidate.startsWith('cg_') ? (getStoredToken(tokenCandidate) || tokenCandidate) : tokenCandidate
     }
 
     sendEvent('status', { 

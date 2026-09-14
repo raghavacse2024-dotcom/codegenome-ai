@@ -23,7 +23,7 @@ const headers = (customToken) => {
   return {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'CodeGenome-AI',
+    'User-Agent': 'CodeGenomeAI-App/1.0 (+https://github.com/raghavacse2024-dotcom/codegenome-ai)',
     ...(token ? { Authorization: `Bearer ${token}` } : {})
   }
 }

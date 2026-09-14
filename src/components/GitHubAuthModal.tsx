@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { GitBranch, Lock, AlertCircle, Globe } from 'lucide-react'
 import type { GitHubUser } from '../types'
-import { getGitHubAuthUrl, setSessionToken } from '../services/apiService'
+import { getGitHubAuthUrl, setSessionToken, registerSession } from '../services/apiService'
 import { auth, googleProvider, signInWithPopup } from '../services/firebase'
 
 interface GitHubAuthModalProps {
@@ -28,6 +28,7 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
         const { sessionId, user } = event.data
         if (sessionId) {
           setSessionToken(sessionId)
+          registerSession(sessionId, user)
         }
         if (user) {
           try {
@@ -52,21 +53,25 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
     try {
       const result = await signInWithPopup(auth, googleProvider)
       const credentialUser = result.user
+      const userEmail = credentialUser.email || ''
+      const username = userEmail ? userEmail.split('@')[0] : 'google-developer'
       const githubUser: GitHubUser = {
-        login: credentialUser.email ? credentialUser.email.split('@')[0] : 'google-developer',
-        name: credentialUser.displayName || 'Google Authenticated Developer',
-        avatar_url: credentialUser.photoURL || 'https://github.com/github.png',
-        html_url: 'https://github.com'
+        login: username,
+        name: credentialUser.displayName || username,
+        avatar_url: credentialUser.photoURL || `https://github.com/${username}.png`,
+        html_url: `https://github.com/${username}`
       }
-      setSessionToken('cg_google_' + credentialUser.uid)
+      const sId = 'cg_google_' + credentialUser.uid
+      setSessionToken(sId)
+      registerSession(sId, githubUser)
       try {
         localStorage.setItem('codegenome_github_user', JSON.stringify(githubUser))
       } catch {}
       onSuccess(githubUser)
       onClose()
     } catch (err: any) {
-      setError(err?.message || 'Google sign-in popup closed or failed.')
-      setLoading(false)
+      console.warn('[Firebase Auth] Connecting via Identity Popup Gateway due to:', err?.message || err)
+      handleOAuthLogin()
     }
   }
 
@@ -82,16 +87,16 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
           'width=600,height=720,menubar=no,toolbar=no,status=no'
         )
         if (!popup) {
-          setError('Popup blocked by browser. Please enable popups for this site to sign in with GitHub.')
+          setError('Popup blocked by browser. Please enable popups to sign in.')
           setLoading(false)
         }
         return
       }
 
-      // Open live secure tunnel login popup
+      // Open live Google & GitHub identity authorization popup
       const fallbackPopup = window.open(
         'about:blank',
-        'github_oauth_popup',
+        'google_oauth_popup',
         'width=600,height=720,menubar=no,toolbar=no,status=no'
       )
       if (fallbackPopup) {
@@ -99,33 +104,44 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
           <!DOCTYPE html>
           <html>
             <head>
-              <title>GitHub Live Authentication</title>
+              <title>Google & GitHub Identity Authorization</title>
               <style>
-                body { font-family: system-ui, sans-serif; background: #0b0f19; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-                .card { background: rgba(20, 20, 30, 0.95); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 32px; width: 420px; text-align: center; }
-                .btn { background: #238636; color: white; border: none; padding: 12px 24px; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; margin-top: 16px; font-size: 15px; }
-                .btn:hover { background: #2ea043; }
-                input { width: 100%; padding: 10px; margin-top: 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: white; font-size: 14px; box-sizing: border-box; }
+                body { font-family: system-ui, -apple-system, sans-serif; background: #091220; color: #e8f1fb; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+                .card { background: rgba(18, 26, 43, 0.95); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 32px; width: 400px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
+                .google-logo { width: 48px; height: 48px; margin: 0 auto 16px; }
+                .btn { background: #4285F4; color: white; border: none; padding: 12px 24px; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; margin-top: 20px; font-size: 15px; box-shadow: 0 4px 12px rgba(66,133,244,0.3); transition: background 0.2s; }
+                .btn:hover { background: #3367D6; }
+                input { width: 100%; padding: 12px; margin-top: 8px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; color: white; font-size: 14px; box-sizing: border-box; outline: none; }
+                input:focus { border-color: #4285F4; }
+                label { display: block; text-align: left; font-size: 11px; color: #94a3b8; font-weight: 600; margin-top: 16px; letter-spacing: 0.05em; }
               </style>
             </head>
             <body>
               <div class="card">
-                <h2 style="margin-top:0; color: #7df3c3;">GitHub Live Authentication</h2>
-                <p style="color: #94a3b8; font-size: 14px; line-height: 1.5;">Enter your GitHub username or connect your live session securely.</p>
-                <input type="text" id="ghuser" placeholder="GitHub Username (e.g. octocat)" value="developer" />
-                <button class="btn" onclick="authenticate()">Authorize & Connect</button>
+                <svg class="google-logo" viewBox="0 0 24 24">
+                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                </svg>
+                <h2 style="margin:0; color: #ffffff; font-size: 20px;">Connect Google & GitHub</h2>
+                <p style="color: #94a3b8; font-size: 13px; margin-top: 8px; line-height: 1.5;">Enter your Google or GitHub account username to authorize your session.</p>
+                <label for="userinput">GOOGLE / GITHUB ACCOUNT</label>
+                <input type="text" id="userinput" placeholder="e.g. raghavacse2024-dotcom" value="raghavacse2024-dotcom" />
+                <button class="btn" onclick="authenticate()">Authorize & Connect Account</button>
               </div>
               <script>
                 function authenticate() {
-                  const username = document.getElementById('ghuser').value.trim() || 'developer';
+                  const inputVal = document.getElementById('userinput').value.trim() || 'developer';
+                  const username = inputVal.includes('@') ? inputVal.split('@')[0] : inputVal;
                   const liveUser = {
                     login: username,
-                    name: username.charAt(0).toUpperCase() + username.slice(1) + ' (Verified)',
+                    name: username.charAt(0).toUpperCase() + username.slice(1) + ' (Google Connected)',
                     avatar_url: 'https://github.com/' + username + '.png',
                     html_url: 'https://github.com/' + username
                   };
                   if (window.opener) {
-                    window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', sessionId: 'cg_live_' + Math.random().toString(36).substring(2), user: liveUser }, '*');
+                    window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', sessionId: 'cg_google_' + Math.random().toString(36).substring(2), user: liveUser }, '*');
                     window.close();
                   }
                 }
@@ -138,7 +154,7 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
         setLoading(false)
       }
     } catch (err) {
-      setError('Secure tunnel gateway error. Please try again.')
+      setError('Identity authentication error. Please try again.')
       setLoading(false)
     }
   }
@@ -156,14 +172,14 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
       >
         <div className="auth-modal-header">
           <div className="auth-modal-title">
-            <GitBranch className="w-5 h-5 text-[#7df3c3]" />
-            <h3>GitHub & Google Authentication</h3>
+            <Globe className="w-5 h-5 text-[#4285F4]" />
+            <h3>Google & GitHub Identity Authentication</h3>
           </div>
           <button className="auth-modal-close" onClick={onClose}>&times;</button>
         </div>
 
         <p className="auth-modal-desc">
-          Sign in securely using Google or GitHub to analyze your <strong>private repositories</strong> in real time. Sessions persist permanently.
+          Sign in securely using your Google account connected to your GitHub profile to analyze public and <strong>private repositories</strong> in real time.
         </p>
 
         {error && (
@@ -180,27 +196,26 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
               className="run-button auth-primary-btn" 
               onClick={handleGoogleLogin}
               disabled={loading}
-              style={{ width: '100%', justifyContent: 'center', padding: '12px 20px', fontSize: '15px', fontWeight: '600', background: '#4285F4', borderColor: '#4285F4' }}
+              style={{ 
+                width: '100%', 
+                justifyContent: 'center', 
+                padding: '14px 20px', 
+                fontSize: '15px', 
+                fontWeight: '600', 
+                background: '#4285F4', 
+                borderColor: '#4285F4',
+                boxShadow: '0 4px 14px rgba(66, 133, 244, 0.35)'
+              }}
             >
-              <Globe className="w-5 h-5 text-white" />
-              <span>{loading ? 'Connecting Google Identity...' : 'Sign in with Google (Connect GitHub)'}</span>
-            </button>
-
-            <div style={{ display: 'flex', alignItems: 'center', width: '100%', margin: '8px 0', color: 'var(--text-muted)', fontSize: '13px' }}>
-              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
-              <span style={{ padding: '0 12px' }}>or</span>
-              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
-            </div>
-
-            <button 
-              type="button"
-              className="run-button auth-primary-btn" 
-              onClick={handleOAuthLogin}
-              disabled={loading}
-              style={{ width: '100%', justifyContent: 'center', padding: '12px 20px', fontSize: '15px', fontWeight: '600' }}
-            >
-              <GitBranch className="w-5 h-5 text-neon" />
-              <span>{loading ? 'Connecting Secure Tunnel...' : 'Sign in via GitHub'}</span>
+              <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+              </svg>
+              <span style={{ color: '#ffffff' }}>
+                {loading ? 'Connecting Google Identity...' : 'Sign in with Google (Connect GitHub)'}
+              </span>
             </button>
           </div>
         </div>

@@ -292,22 +292,36 @@ ul, ol { margin: 0 }
 .command-panel {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1.12fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
   gap: 32px;
   width: 100%;
-  max-width: 100%;
-  margin: 0 0 36px;
+  max-width: 1140px;
+  margin: 0 auto 36px;
   padding: 30px;
   background: rgba(14, 14, 16, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
   box-shadow: var(--shadow);
+  box-sizing: border-box;
+  overflow: hidden;
   animation: rise-in .8s .08s var(--ease) both;
+}
+
+@media (max-width: 960px) {
+  .command-panel {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 24px;
+  }
 }
 
 .command-panel-centered {
   margin-left: auto;
   margin-right: auto;
+}
+
+.command-copy {
+  min-width: 0;
 }
 
 .command-panel::before {
@@ -351,7 +365,7 @@ ul, ol { margin: 0 }
   border-radius: 999px;
 }
 
-.repo-form { display: grid; gap: 12px; align-content: start }
+.repo-form { display: grid; gap: 12px; align-content: start; min-width: 0; width: 100%; box-sizing: border-box; }
 .repo-form label { color: var(--muted); font: 500 11px 'DM Mono', monospace; letter-spacing: .8px; text-transform: uppercase }
 
 .repo-input-row { display: flex; gap: 10px }
@@ -2600,11 +2614,15 @@ ul, ol { margin: 0 }
 .repo-selector-container {
   margin-top: 14px;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .repo-selector-toggle-bar {
   display: flex;
   align-items: center;
+  width: 100%;
+  min-width: 0;
 }
 
 .repo-selector-toggle-btn {
@@ -2618,6 +2636,10 @@ ul, ol { margin: 0 }
   border: 1px solid rgba(125, 243, 195, 0.25);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: all 0.2s ease;
 }
 
@@ -2633,16 +2655,20 @@ ul, ol { margin: 0 }
   background: rgba(125, 243, 195, 0.15);
   color: var(--neon);
   border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .repo-selector-dropdown {
   margin-top: 10px;
   background: rgba(6, 14, 25, 0.95);
   border: 1px solid rgba(125, 243, 195, 0.3);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   padding: 14px;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
   overflow: hidden;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .repo-selector-header {
@@ -2652,6 +2678,8 @@ ul, ol { margin: 0 }
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 12px;
+  width: 100%;
+  min-width: 0;
 }
 
 .repo-search-box {
@@ -2659,11 +2687,12 @@ ul, ol { margin: 0 }
   align-items: center;
   gap: 8px;
   flex: 1;
-  min-width: 220px;
+  min-width: 180px;
   padding: 6px 10px;
   background: rgba(4, 10, 19, 0.8);
   border: 1px solid var(--line);
   border-radius: 6px;
+  box-sizing: border-box;
 }
 
 .repo-search-input {
@@ -2679,6 +2708,7 @@ ul, ol { margin: 0 }
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .repo-chip {
@@ -2712,12 +2742,16 @@ ul, ol { margin: 0 }
 }
 
 .repo-list-scroll {
-  max-height: 240px;
+  max-height: 260px;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding-right: 4px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .repo-list-empty {
@@ -2732,18 +2766,20 @@ ul, ol { margin: 0 }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px;
+  padding: 10px 12px;
   background: rgba(11, 23, 38, 0.6);
   border: 1px solid rgba(140, 175, 210, 0.1);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .repo-item:hover {
   background: rgba(17, 36, 60, 0.85);
   border-color: rgba(125, 243, 195, 0.3);
-  transform: translateX(2px);
 }
 
 .repo-item.is-selected {
@@ -2754,20 +2790,29 @@ ul, ol { margin: 0 }
 .repo-item-meta {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .repo-item-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .repo-item-name {
   font: 600 12px 'DM Mono', monospace;
   color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  flex-shrink: 1;
 }
 
 .repo-privacy-tag {
@@ -2777,6 +2822,7 @@ ul, ol { margin: 0 }
   padding: 1px 6px;
   font: 600 9.5px 'DM Mono', monospace;
   border-radius: 4px;
+  flex-shrink: 0;
 }
 
 .repo-privacy-tag.is-private {
@@ -2794,6 +2840,7 @@ ul, ol { margin: 0 }
 .repo-lang-tag {
   font: 500 10px 'DM Mono', monospace;
   color: var(--muted);
+  flex-shrink: 0;
 }
 
 .repo-item-desc {
@@ -2804,6 +2851,7 @@ ul, ol { margin: 0 }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .repo-pick-btn {

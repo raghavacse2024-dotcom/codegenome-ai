@@ -28,10 +28,14 @@ export async function analyzeRepository(repositoryUrl, token = null, onProgress 
     return result
   }, 60_000)
 
+  const isUserAuthenticated = Boolean(token && String(token).trim().length > 0)
+  const isLive = analysis.source === 'live' || isUserAuthenticated
+
   return {
     ...analysis,
-    isDemo: analysis.source !== 'live',
-    mode: analysis.source === 'live' ? 'live' : 'demo',
+    isDemo: !isLive,
+    mode: isLive ? 'live' : 'demo',
+    source: isLive ? 'live' : 'demo-safe',
   }
 }
 

@@ -279,12 +279,32 @@ export function getCurrentUser() {
   })
 }
 
+export function registerSession(sessionId: string, user?: GitHubUser, token?: string) {
+  return request<{ success: boolean }>('/api/auth/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, user, token }),
+  }).catch(() => null)
+}
+
 /**
  * Fetches repositories accessible to the logged in user (including private)
  */
-export function getUserRepositories() {
-  return request<{ repositories: UserRepo[] }>('/api/auth/repos', {
+export function getUserRepositories(username?: string) {
+  let login = username
+  if (!login) {
+    try {
+      const cached = localStorage.getItem('codegenome_github_user')
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        login = parsed.login
+      }
+    } catch {}
+  }
+  const query = login ? `?username=${encodeURIComponent(login)}` : ''
+  return request<{ repositories: UserRepo[] }>(`/api/auth/repos${query}`, {
     method: 'GET',
+    headers: login ? { 'X-GitHub-User': login } : {},
   })
 }
 

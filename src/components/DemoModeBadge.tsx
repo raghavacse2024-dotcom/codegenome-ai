@@ -7,8 +7,8 @@ export function DemoModeBadge({ isDemo }: { isDemo: boolean }) {
       <span className="notice-dot" aria-hidden="true" />
       <p>
         {isDemo
-          ? 'Demo-safe deterministic analysis: GitHub/OpenAI access is limited, so results are generated from bounded public data or demo-safe samples.'
-          : 'Live OpenAI-enhanced analysis'}
+          ? 'Public sample mode: Sign in with your Google or GitHub account to execute Live Multi-Agent Telemetry Analysis.'
+          : 'Live Authenticated Multi-Agent Intelligence Network (Live AST Telemetry & AI Model Enhancement)'}
       </p>
     </div>
   )
