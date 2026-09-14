@@ -59,43 +59,42 @@ export function HeaderNav({ currentView, onSelectView, user, onOpenAuth, onLogou
           </span>
         </button>
 
-        {/* Navigation Links - Fade animation and conditional display */}
-        <AnimatePresence mode="wait">
-          {currentView === 'home' && (
-            <motion.nav 
-              className="header-links"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.3, ease: 'easeInOut' }}
-            >
-              <a 
-                href="#capabilities" 
-                className={`header-link ${activeSection === 'capabilities' ? 'is-active' : ''}`}
-              >
-                Capabilities
-              </a>
-              <a 
-                href="#how-it-works" 
-                className={`header-link ${activeSection === 'how-it-works' ? 'is-active' : ''}`}
-              >
-                How It Works
-              </a>
-              <a 
-                href="#agent-network" 
-                className={`header-link ${activeSection === 'agent-network' ? 'is-active' : ''}`}
-              >
-                Agent Network
-              </a>
-              <a 
-                href="#infrastructure" 
-                className={`header-link ${activeSection === 'infrastructure' ? 'is-active' : ''}`}
-              >
-                Infrastructure
-              </a>
-            </motion.nav>
-          )}
-        </AnimatePresence>
+        {/* Navigation Links - Fixed position slot with smooth CSS opacity transition */}
+        <nav 
+          className="header-links"
+          style={{ 
+            opacity: currentView === 'home' ? 1 : 0, 
+            visibility: currentView === 'home' ? 'visible' : 'hidden',
+            pointerEvents: currentView === 'home' ? 'auto' : 'none',
+            transition: 'opacity 0.3s ease, transform 0.3s ease, visibility 0.3s ease',
+            transform: currentView === 'home' ? 'translateY(0)' : 'translateY(-6px)'
+          }}
+        >
+          <a 
+            href="#capabilities" 
+            className={`header-link ${activeSection === 'capabilities' ? 'is-active' : ''}`}
+          >
+            Capabilities
+          </a>
+          <a 
+            href="#how-it-works" 
+            className={`header-link ${activeSection === 'how-it-works' ? 'is-active' : ''}`}
+          >
+            How It Works
+          </a>
+          <a 
+            href="#agent-network" 
+            className={`header-link ${activeSection === 'agent-network' ? 'is-active' : ''}`}
+          >
+            Agent Network
+          </a>
+          <a 
+            href="#infrastructure" 
+            className={`header-link ${activeSection === 'infrastructure' ? 'is-active' : ''}`}
+          >
+            Infrastructure
+          </a>
+        </nav>
 
         {/* Header Actions */}
         <div className="header-actions">

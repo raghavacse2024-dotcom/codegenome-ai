@@ -71,6 +71,8 @@
 html { 
   scroll-behavior: smooth;
   background-color: #000000;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -82,6 +84,7 @@ body {
   font-family: Manrope, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   transition: background-color 0.3s ease, color 0.3s ease;
+  overflow-x: hidden;
 }
 
 body[data-theme='studio-carbon'],
