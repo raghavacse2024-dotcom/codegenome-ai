@@ -49,6 +49,9 @@ prRouter.post('/pr/create', async (req, res, next) => {
     if (customPat && typeof customPat === 'string' && customPat.trim().length > 5) {
       token = customPat.trim()
     }
+    if (!token && process.env.GITHUB_TOKEN) {
+      token = process.env.GITHUB_TOKEN.trim()
+    }
 
     const refactorData = analysis.results?.refactor?.data || {}
     const scaffolds = refactorData.scaffolds || []

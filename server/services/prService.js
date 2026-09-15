@@ -79,13 +79,29 @@ export async function createPullRequest({
           isCrossFork = true
           targetOwner = apiUserLogin
 
-          const forkRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/forks`, {
+          // Fork repository to user's account
+          await fetch(`https://api.github.com/repos/${owner}/${repository}/forks`, {
             method: 'POST',
             headers: githubHeaders(cleanToken),
             signal: AbortSignal.timeout(10_000),
-          })
-          if (forkRes.ok || forkRes.status === 202) {
+          }).catch(() => {})
+
+          // Poll up to 6 times (up to 12s) to ensure fork repository is created and ready
+          let forkReady = false
+          for (let attempt = 0; attempt < 6; attempt++) {
             await new Promise((r) => setTimeout(r, 2000))
+            const checkFork = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}`, {
+              headers: githubHeaders(cleanToken),
+              signal: AbortSignal.timeout(5_000),
+            })
+            if (checkFork.ok) {
+              forkReady = true
+              break
+            }
+          }
+
+          if (!forkReady) {
+            console.warn(`[PR Service] Fork ${targetOwner}/${repository} creation timed out.`)
           }
         }
 
