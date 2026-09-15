@@ -24,8 +24,8 @@ function githubHeaders(token) {
 
 /**
  * Creates a Pull Request on GitHub.
- * If write permissions exist, executes live Git Tree + Commit + Ref + PR creation.
- * Otherwise, generates a complete PR Preview with ready-to-apply patch and CLI commands.
+ * If write permissions exist on target repo, pushes branch directly.
+ * If write permissions do NOT exist, automatically forks repo, pushes branch to user's fork, and creates cross-fork PR!
  */
 export async function createPullRequest({
   owner,
@@ -54,15 +54,26 @@ export async function createPullRequest({
       baseBranch: defaultBranch,
       title: prTitle,
       body: prBody,
-      prUrl: `https://github.com/${owner}/${repository}/compare/${defaultBranch}...${safeBranch}`,
+      prUrl: `https://github.com/${owner}/${repository}`,
       patch,
       cliCommand,
-      message: 'PR bundle generated in Preview Mode. Connect a GitHub token with write access to submit directly to GitHub.',
+      message: 'PR patch generated! Please Sign in with GitHub to automatically push branches and submit Pull Requests.',
     }
   }
 
-  // 2. Query repository metadata and permissions
   try {
+    // Get authenticated user info
+    let userLogin = null
+    const userRes = await fetch('https://api.github.com/user', {
+      headers: githubHeaders(cleanToken),
+      signal: AbortSignal.timeout(8_000),
+    })
+    if (userRes.ok) {
+      const userData = await userRes.json()
+      userLogin = userData.login
+    }
+
+    // Query repository metadata and permissions
     const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repository}`, {
       headers: githubHeaders(cleanToken),
       signal: AbortSignal.timeout(8_000),
@@ -77,7 +88,7 @@ export async function createPullRequest({
         baseBranch: defaultBranch,
         title: prTitle,
         body: prBody,
-        prUrl: `https://github.com/${owner}/${repository}/compare/${defaultBranch}...${safeBranch}`,
+        prUrl: `https://github.com/${owner}/${repository}`,
         patch,
         cliCommand,
         message: `GitHub repository check: ${errBody.message || repoRes.statusText}. Generated in Preview Mode.`,
@@ -88,31 +99,34 @@ export async function createPullRequest({
     const targetBaseBranch = repoData.default_branch || defaultBranch
     const canPush = Boolean(repoData.permissions?.push || repoData.permissions?.admin)
 
-    if (!canPush) {
-      // User does not have direct write/push access to target repository
-      return {
-        success: true,
-        mode: 'simulated',
-        branch: safeBranch,
-        baseBranch: targetBaseBranch,
-        title: prTitle,
-        body: prBody,
-        prUrl: `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${safeBranch}`,
-        patch,
-        cliCommand,
-        message: `Your GitHub account has read access to ${owner}/${repository}, but write permissions are required to push new branches directly. You can apply the patch locally or create a fork.`,
+    let targetOwner = owner
+    let isCrossFork = false
+
+    if (!canPush && userLogin) {
+      // User doesn't have write access to original repo -> Fork to user's account!
+      isCrossFork = true
+      targetOwner = userLogin
+
+      // Create or check fork
+      const forkRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/forks`, {
+        method: 'POST',
+        headers: githubHeaders(cleanToken),
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (forkRes.ok || forkRes.status === 202) {
+        // Give GitHub a moment to establish fork ref
+        await new Promise((r) => setTimeout(r, 2000))
       }
     }
 
-    // 3. User has push access! Execute live Git API workflow
-    // Step A: Get reference commit of base branch
+    // Step A: Get reference commit of base branch from target or parent repo
     const refRes = await fetch(
       `https://api.github.com/repos/${owner}/${repository}/git/ref/heads/${encodeURIComponent(targetBaseBranch)}`,
       { headers: githubHeaders(cleanToken), signal: AbortSignal.timeout(8_000) }
     )
 
     if (!refRes.ok) {
-      throw new Error(`Failed to resolve base branch reference ${targetBaseBranch}`)
+      throw new Error(`Failed to resolve base branch reference '${targetBaseBranch}' on ${owner}/${repository}`)
     }
 
     const refData = await refRes.json()
@@ -126,7 +140,7 @@ export async function createPullRequest({
     const commitData = await commitRes.json()
     const baseTreeSha = commitData.tree.sha
 
-    // Step C: Create new Git tree with all files
+    // Step C: Create new Git tree with all files on target repo (user fork or main repo)
     const treePayload = {
       base_tree: baseTreeSha,
       tree: files.map((f) => ({
@@ -137,7 +151,7 @@ export async function createPullRequest({
       })),
     }
 
-    const newTreeRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/git/trees`, {
+    const newTreeRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/trees`, {
       method: 'POST',
       headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
       body: JSON.stringify(treePayload),
@@ -146,14 +160,14 @@ export async function createPullRequest({
 
     if (!newTreeRes.ok) {
       const err = await newTreeRes.json().catch(() => ({}))
-      throw new Error(`Failed to create Git tree: ${err.message || newTreeRes.statusText}`)
+      throw new Error(`Failed to create Git tree on ${targetOwner}/${repository}: ${err.message || newTreeRes.statusText}`)
     }
 
     const newTreeData = await newTreeRes.json()
     const newTreeSha = newTreeData.sha
 
-    // Step D: Create Git Commit
-    const newCommitRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/git/commits`, {
+    // Step D: Create Git Commit on target repo
+    const newCommitRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/commits`, {
       method: 'POST',
       headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -172,8 +186,8 @@ export async function createPullRequest({
     const newCommitData = await newCommitRes.json()
     const newCommitSha = newCommitData.sha
 
-    // Step E: Create new branch reference
-    const createRefRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/git/refs`, {
+    // Step E: Create new branch reference on target repo
+    const createRefRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/refs`, {
       method: 'POST',
       headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -188,41 +202,54 @@ export async function createPullRequest({
       throw new Error(`Failed to create branch ${safeBranch}: ${err.message || createRefRes.statusText}`)
     }
 
-    // Step F: Open Pull Request
+    // Step F: Open Pull Request on original owner/repository
+    const headRef = isCrossFork ? `${userLogin}:${safeBranch}` : safeBranch
     const prRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/pulls`, {
       method: 'POST',
       headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: prTitle,
-        head: safeBranch,
+        head: headRef,
         base: targetBaseBranch,
         body: prBody,
       }),
       signal: AbortSignal.timeout(8_000),
     })
 
-    if (!prRes.ok) {
-      const err = await prRes.json().catch(() => ({}))
-      throw new Error(`Failed to create Pull Request: ${err.message || prRes.statusText}`)
+    if (prRes.ok) {
+      const prResult = await prRes.json()
+      return {
+        success: true,
+        mode: 'live',
+        prUrl: prResult.html_url,
+        prNumber: prResult.number,
+        branch: safeBranch,
+        baseBranch: targetBaseBranch,
+        title: prTitle,
+        body: prBody,
+        cliCommand,
+        message: `Successfully created Pull Request #${prResult.number} on GitHub!`,
+      }
     }
 
-    const prResult = await prRes.json()
+    // If PR creation via API had an issue, provide direct cross-fork comparison URL on GitHub
+    const compareUrl = isCrossFork
+      ? `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${userLogin}:${safeBranch}`
+      : `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${safeBranch}`
 
     return {
       success: true,
       mode: 'live',
-      prUrl: prResult.html_url,
-      prNumber: prResult.number,
+      prUrl: compareUrl,
       branch: safeBranch,
       baseBranch: targetBaseBranch,
       title: prTitle,
       body: prBody,
       cliCommand,
-      message: `Successfully created Pull Request #${prResult.number} on GitHub!`,
+      message: `Branch pushed to ${targetOwner}/${repository}! Click 'Review and Compare' to complete Pull Request on GitHub.`,
     }
   } catch (error) {
     console.error('[PR Service] Live PR error:', error)
-    // Fall back to preview mode with the patch and error explanation
     return {
       success: true,
       mode: 'simulated',
@@ -230,10 +257,10 @@ export async function createPullRequest({
       baseBranch: defaultBranch,
       title: prTitle,
       body: prBody,
-      prUrl: `https://github.com/${owner}/${repository}/compare/${defaultBranch}...${safeBranch}`,
+      prUrl: `https://github.com/${owner}/${repository}`,
       patch,
       cliCommand,
-      message: `Live PR creation encountered an issue: ${error.message}. PR bundle generated in Preview Mode.`,
+      message: `Live PR creation notice: ${error.message}. PR patch bundle is ready to download.`,
     }
   }
 }

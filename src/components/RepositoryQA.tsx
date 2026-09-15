@@ -46,13 +46,17 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
 
+    const historyToSend = messages
+      .filter((m) => !m.id.startsWith('init-'))
+      .map((m) => ({ role: m.role, content: m.content }))
+
     setMessages((prev) => [...prev, userMsg])
     setQuestion('')
     setLoading(true)
     setError('')
 
     try {
-      const res = await askQuestion(analysisId, textToSubmit)
+      const res = await askQuestion(analysisId, textToSubmit, historyToSend)
       const botMsg: ChatMessage = {
         id: 'bot-' + Date.now(),
         role: 'assistant',

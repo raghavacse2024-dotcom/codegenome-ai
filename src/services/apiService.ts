@@ -357,11 +357,15 @@ export async function downloadScaffolds(analysisId: string) {
 /**
  * Asks a grounded question against a completed analysis.
  */
-export function askQuestion(analysisId: string, question: string) {
+export function askQuestion(
+  analysisId: string,
+  question: string,
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>
+) {
   return request<QaAnswer>('/api/qa', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ analysisId, question }),
+    body: JSON.stringify({ analysisId, question, history }),
   })
 }
 
