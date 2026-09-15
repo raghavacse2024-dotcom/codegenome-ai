@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { doc, setDoc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore'
+import { doc, setDoc, getDoc, collection, getDocs, query, where, limit } from 'firebase/firestore'
 import { getServerFirestore } from './firestoreServer.js'
 
 const analyses = new Map()
@@ -122,30 +122,37 @@ export async function getAnalysis(analysisId) {
 }
 
 /**
- * Retrieves recent persisted analyses from Firestore database.
+ * Retrieves recent persisted analyses for a specific user from Firestore database.
+ * @param {string | null} userId Authenticated user login identifier.
  * @param {number} [maxCount=12] Max records to return.
  * @returns {Promise<Array<object>>}
  */
-export async function getRecentAnalyses(maxCount = 12) {
+export async function getRecentAnalyses(userId = null, maxCount = 12) {
+  if (!userId) {
+    return []
+  }
+
   try {
     const db = getServerFirestore()
     if (db) {
       const colRef = collection(db, 'analyses')
-      const q = query(colRef, orderBy('createdAt', 'desc'), limit(maxCount))
+      const q = query(colRef, where('userId', '==', userId), limit(50))
       const snapshot = await getDocs(q)
       const list = []
       snapshot.forEach((d) => {
         list.push(restoreFromFirestore(d.data()))
       })
-      if (list.length > 0) return list
+      return list
+        .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0))
+        .slice(0, maxCount)
     }
   } catch (err) {
     console.warn('[Firestore] Failed to query recent analyses:', err.message)
   }
 
-  // Fallback to recent in-memory records
-  const memoryList = Array.from(analyses.values())
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+  // Fallback to recent in-memory records matching user
+  return Array.from(analyses.values())
+    .filter((item) => item.userId === userId)
+    .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0))
     .slice(0, maxCount)
-  return memoryList
 }

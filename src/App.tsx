@@ -245,6 +245,7 @@ export default function App() {
                 </div>
                 <PersistentHistoryDrawer 
                   currentAnalysisId={analysis?.analysisId}
+                  user={user}
                   onSelectAnalysis={(saved) => {
                     setLoadedAnalysis(saved)
                     if (saved.repo?.url) setUrl(saved.repo.url)

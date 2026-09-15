@@ -1,19 +1,21 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Database, Clock, ArrowUpRight, ShieldCheck, RefreshCw, CheckCircle2 } from 'lucide-react'
-import type { Analysis } from '../types'
+import type { Analysis, GitHubUser } from '../types'
 import { getAnalysisHistory } from '../services/apiService'
 
 interface PersistentHistoryDrawerProps {
   onSelectAnalysis: (analysis: Analysis) => void
   onSelectUrl: (url: string) => void
   currentAnalysisId?: string
+  user?: GitHubUser | null
 }
 
 export function PersistentHistoryDrawer({
   onSelectAnalysis,
   onSelectUrl,
   currentAnalysisId,
+  user,
 }: PersistentHistoryDrawerProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [historyList, setHistoryList] = useState<Analysis[]>([])
@@ -21,15 +23,22 @@ export function PersistentHistoryDrawer({
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date())
 
   const fetchHistory = async () => {
+    if (!user) {
+      setHistoryList([])
+      return
+    }
     setLoading(true)
     try {
       const data = await getAnalysisHistory()
       if (data && Array.isArray(data.analyses)) {
         setHistoryList(data.analyses)
         setLastRefreshed(new Date())
+      } else {
+        setHistoryList([])
       }
     } catch (err) {
       console.warn('[History] Could not load persisted scans:', err)
+      setHistoryList([])
     } finally {
       setLoading(false)
     }
@@ -37,7 +46,7 @@ export function PersistentHistoryDrawer({
 
   useEffect(() => {
     fetchHistory()
-  }, [])
+  }, [user?.login])
 
   return (
     <div className="persistent-history-container">
@@ -96,8 +105,17 @@ export function PersistentHistoryDrawer({
             </div>
           ) : historyList.length === 0 ? (
             <div className="history-empty">
-              <p>No repository scans stored in Firestore yet.</p>
-              <p className="sub">Run an analysis above to persist your first architectural scan!</p>
+              {!user ? (
+                <>
+                  <p>No user session active.</p>
+                  <p className="sub">Please Sign in with GitHub above to view and persist repository scans for your account.</p>
+                </>
+              ) : (
+                <>
+                  <p>No repository scans stored in Firestore for @{user.login} yet.</p>
+                  <p className="sub">Run an analysis above to persist your first architectural scan!</p>
+                </>
+              )}
             </div>
           ) : (
             <div className="history-records-list">

@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { AnalyzeRequestSchema } from '../contracts.js'
 import { analyzeRepository } from '../services/analysisEngine.js'
 import { saveAnalysis } from '../services/analysisStore.js'
-import { getStoredToken } from './auth.js'
+import { getStoredToken, getStoredUser } from './auth.js'
 
 export const analyzeRouter = Router()
 
@@ -16,7 +16,8 @@ analyzeRouter.post('/analyze', async (request, response, next) => {
     const authHeader = request.headers.authorization
     if (authHeader?.startsWith('Bearer ')) {
       const raw = authHeader.slice(7).trim()
-      userId = raw.startsWith('cg_') ? raw : null
+      const storedUser = getStoredUser(raw)
+      userId = storedUser?.login || (raw.startsWith('cg_') ? raw : null)
       userToken = raw.startsWith('cg_') ? (getStoredToken(raw) || raw) : raw
     }
 
@@ -69,7 +70,8 @@ async function handleAnalyzeStream(request, response, next) {
       : (typeof request.query.token === 'string' ? request.query.token.trim() : null)
 
     if (tokenCandidate) {
-      userId = tokenCandidate.startsWith('cg_') ? tokenCandidate : null
+      const storedUser = getStoredUser(tokenCandidate)
+      userId = storedUser?.login || (tokenCandidate.startsWith('cg_') ? tokenCandidate : null)
       userToken = tokenCandidate.startsWith('cg_') ? (getStoredToken(tokenCandidate) || tokenCandidate) : tokenCandidate
     }
 
@@ -99,11 +101,28 @@ async function handleAnalyzeStream(request, response, next) {
 analyzeRouter.get('/analyze/stream', handleAnalyzeStream)
 analyzeRouter.post('/analyze/stream', handleAnalyzeStream)
 
-// Persistent database endpoint: list recent repository scans
+// Persistent database endpoint: list recent repository scans for authenticated user only
 analyzeRouter.get('/history', async (request, response, next) => {
   try {
     const { getRecentAnalyses } = await import('../services/analysisStore.js')
-    const recents = await getRecentAnalyses(15)
+
+    let userId = null
+    const authHeader = request.headers.authorization
+    const tokenCandidate = authHeader?.startsWith('Bearer ') 
+      ? authHeader.slice(7).trim() 
+      : (typeof request.query.token === 'string' ? request.query.token.trim() : null)
+
+    if (tokenCandidate) {
+      const storedUser = getStoredUser(tokenCandidate)
+      userId = storedUser?.login || (tokenCandidate.startsWith('cg_') ? tokenCandidate : null)
+    }
+
+    // If no user is logged in, return empty persistent history
+    if (!userId) {
+      return response.json({ analyses: [] })
+    }
+
+    const recents = await getRecentAnalyses(userId, 15)
     response.json({ analyses: recents })
   } catch (error) {
     next(error)

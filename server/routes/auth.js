@@ -20,6 +20,11 @@ export function getStoredToken(sessionId) {
   return tokenStore.get(sessionId)?.token || null
 }
 
+export function getStoredUser(sessionId) {
+  if (!sessionId) return null
+  return tokenStore.get(sessionId)?.user || null
+}
+
 export function setStoredToken(sessionId, token, user) {
   if (!sessionId) return
   tokenStore.set(sessionId, { token, user, timestamp: Date.now() })
@@ -59,7 +64,8 @@ authRouter.get('/auth/github/url', (req, res) => {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: 'read:user repo',
+    scope: 'repo read:user user:email',
+    prompt: 'consent',
     state,
   })
 
@@ -219,7 +225,7 @@ authRouter.get('/auth/repos', async (req, res) => {
   }
 
   try {
-    let fetchUrl = 'https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member'
+    let fetchUrl = 'https://api.github.com/user/repos?visibility=all&sort=updated&per_page=100&affiliation=owner,collaborator,organization_member'
     const headers = {
       Accept: 'application/vnd.github+json',
       'User-Agent': 'CodeGenome-AI',

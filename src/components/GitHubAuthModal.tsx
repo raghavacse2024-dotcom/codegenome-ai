@@ -145,7 +145,11 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
               </div>
               <script>
                 function authenticate() {
-                  const inputVal = document.getElementById('userinput').value.trim() || 'developer';
+                  const inputVal = document.getElementById('userinput').value.trim();
+                  if (!inputVal) {
+                    alert('Please enter your GitHub account username.');
+                    return;
+                  }
                   const username = inputVal.includes('@') ? inputVal.split('@')[0] : inputVal;
                   const liveUser = {
                     login: username,
