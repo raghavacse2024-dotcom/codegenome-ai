@@ -109,18 +109,31 @@ Return a valid JSON object only with:
     }
   }
 
-  // Optional OpenAI if valid key provided
-  if (isValidKey(process.env.OPENAI_API_KEY) && process.env.OPENAI_API_KEY.startsWith('sk-') && process.env.OPENAI_MODEL) {
+  // Optional OpenAI / Z.ai if valid key provided
+  if (isValidKey(process.env.OPENAI_API_KEY) && process.env.OPENAI_MODEL) {
     try {
-      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-      const callPromise = client.responses.create({
-        model: process.env.OPENAI_MODEL,
-        instructions: 'Answer developer question about the analyzed codebase. Return JSON with answer, confidence, and sourceFiles.',
-        input: JSON.stringify({ question, analysis }),
+      const client = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+        ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {})
       })
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('OpenAI timeout')), 4500))
+      const callPromise = client.chat.completions.create({
+        model: process.env.OPENAI_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: 'Answer developer question about the analyzed codebase. Return a valid JSON object with answer, confidence, and sourceFiles.'
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({ question, analysis })
+          }
+        ],
+        response_format: { type: 'json_object' }
+      })
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 4500))
       const result = await Promise.race([callPromise, timeoutPromise])
-      return { ...fallback, ...JSON.parse(result.output_text) }
+      const content = result.choices?.[0]?.message?.content || '{}'
+      return { ...fallback, ...JSON.parse(content) }
     } catch {
       return fallback
     }

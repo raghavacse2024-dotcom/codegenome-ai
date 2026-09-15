@@ -37,7 +37,7 @@ async function githubFetch(path, customToken) {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw Object.assign(
-      new Error(response.status === 403 ? 'GitHub rate limit reached. Add GITHUB_TOKEN or Sign in with GitHub.' : (body.message || `GitHub returned ${response.status}`)),
+      new Error(response.status === 403 ? 'GitHub rate limit reached. Please Sign in with GitHub.' : (body.message || `GitHub returned ${response.status}`)),
       { status: response.status }
     )
   }

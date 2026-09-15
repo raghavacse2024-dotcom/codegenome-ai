@@ -72,20 +72,33 @@ ${JSON.stringify(deterministic)}`
     }
   }
 
-  // OpenAI enhancement if valid
-  if (isValidKey(process.env.OPENAI_API_KEY) && process.env.OPENAI_API_KEY.startsWith('sk-') && process.env.OPENAI_MODEL) {
+  // OpenAI / Z.ai enhancement if valid
+  if (isValidKey(process.env.OPENAI_API_KEY) && process.env.OPENAI_MODEL) {
     try {
-      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-      const callPromise = client.responses.create({
-        model: process.env.OPENAI_MODEL,
-        instructions: `You are the ${name} agent in CodeGenome AI. Improve supplied JSON without inventing facts. Return JSON only with the same fields.`,
-        input: JSON.stringify({ deterministic, context: { repo: context.repo, filePaths: context.files.map((f) => f.path).slice(0, 20) } })
+      const client = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+        ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {})
       })
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3500))
+      const callPromise = client.chat.completions.create({
+        model: process.env.OPENAI_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: `You are the ${name} agent in CodeGenome AI. Improve supplied JSON without inventing facts. Return a valid JSON object only with the same fields.`
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({ deterministic, context: { repo: context.repo, filePaths: context.files.map((f) => f.path).slice(0, 20) } })
+          }
+        ],
+        response_format: { type: 'json_object' }
+      })
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4500))
       const response = await Promise.race([callPromise, timeoutPromise])
-      return { data: { ...deterministic, ...JSON.parse(response.output_text) }, source: 'openai' }
+      const content = response.choices?.[0]?.message?.content || '{}'
+      return { data: { ...deterministic, ...JSON.parse(content) }, source: 'openai' }
     } catch (err) {
-      console.warn(`[Agents] OpenAI enhancement skipped for ${name}:`, err.message)
+      console.warn(`[Agents] OpenAI/Z.ai enhancement skipped for ${name}:`, err.message)
     }
   }
 

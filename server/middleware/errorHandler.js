@@ -35,7 +35,7 @@ export function errorHandler(error, request, response, next) {
 export function friendlyMessage(status, message) {
   if (status === 400) return message
   if (status === 404) return 'GitHub repository not found. Check that the URL is public.'
-  if (status === 403) return 'GitHub rate limit reached. Add GITHUB_TOKEN to Render.'
+  if (status === 403) return 'GitHub rate limit reached. Please Sign in with GitHub.'
   if (status === 504 || /timeout/i.test(message)) return 'Timeout after 60 seconds. Repo too large or external APIs are slow.'
   if (/OpenAI/i.test(message)) return 'OpenAI API error. Using demo mode when possible.'
   return message.replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
