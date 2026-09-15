@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { getAnalysis } from '../services/analysisStore.js'
 import { createPullRequest } from '../services/prService.js'
-import { getStoredToken } from './auth.js'
+import { getStoredToken, getStoredUser } from './auth.js'
 
 export const prRouter = Router()
 

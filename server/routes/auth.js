@@ -198,6 +198,7 @@ authRouter.post('/auth/session', (req, res) => {
  */
 authRouter.get('/auth/repos', async (req, res) => {
   const authHeader = req.headers.authorization
+  const customPat = req.headers['x-github-token']
   let token = process.env.GITHUB_TOKEN || null
   let sessionId = null
 
@@ -207,9 +208,13 @@ authRouter.get('/auth/repos', async (req, res) => {
       sessionId = raw
       const stored = tokenStore.get(raw)
       if (stored?.token) token = stored.token
-    } else if (raw) {
+    } else if (raw && raw.length > 5) {
       token = raw
     }
+  }
+
+  if (customPat && typeof customPat === 'string' && customPat.trim().length > 5) {
+    token = customPat.trim()
   }
 
   let username = (req.query.username ? String(req.query.username) : null) || (req.headers['x-github-user'] ? String(req.headers['x-github-user']) : null)
@@ -220,47 +225,101 @@ authRouter.get('/auth/repos', async (req, res) => {
     }
   }
 
+  if (token && (!username || username === 'developer')) {
+    try {
+      const uRes = await fetch('https://api.github.com/user', {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'CodeGenome-AI',
+        },
+      })
+      if (uRes.ok) {
+        const uData = await uRes.json()
+        if (uData.login) username = uData.login
+      }
+    } catch {}
+  }
+
   if (!username || username === 'developer') {
     username = 'raghavacse2024-dotcom'
   }
 
+  const repoMap = new Map()
+
   try {
-    let fetchUrl = 'https://api.github.com/user/repos?visibility=all&sort=updated&per_page=100&affiliation=owner,collaborator,organization_member'
-    const headers = {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'CodeGenome-AI',
-    }
-
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    } else {
-      fetchUrl = `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated&per_page=100`
-    }
-
-    let reposRes = await fetch(fetchUrl, { headers })
-
-    if (!reposRes.ok && token) {
-      fetchUrl = `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated&per_page=100`
-      const pubHeaders = { Accept: 'application/vnd.github+json', 'User-Agent': 'CodeGenome-AI' }
-      reposRes = await fetch(fetchUrl, { headers: pubHeaders })
-    }
-
-    if (reposRes.ok) {
-      const repos = await reposRes.json()
-      if (Array.isArray(repos) && repos.length > 0) {
-        const mapped = repos.map((r) => ({
-          name: r.name,
-          fullName: r.full_name,
-          owner: r.owner?.login || username,
-          private: Boolean(r.private),
-          url: r.html_url,
-          description: r.description || `Repository owned by ${username}`,
-          language: r.language || 'TypeScript',
-          stars: r.stargazers_count || 0,
-          updatedAt: r.updated_at,
-        }))
-        return res.json({ repositories: mapped })
+      // Fetch authenticated user's repositories across multiple pages (up to 5 pages = 500 repos)
+      for (let page = 1; page <= 5; page++) {
+        const fetchUrl = `https://api.github.com/user/repos?visibility=all&sort=updated&per_page=100&page=${page}&affiliation=owner,collaborator,organization_member`
+        const reposRes = await fetch(fetchUrl, {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${token}`,
+            'User-Agent': 'CodeGenome-AI',
+          },
+        })
+        if (reposRes.ok) {
+          const pageRepos = await reposRes.json()
+          if (Array.isArray(pageRepos) && pageRepos.length > 0) {
+            for (const r of pageRepos) {
+              if (r.full_name && !repoMap.has(r.full_name)) {
+                repoMap.set(r.full_name, r)
+              }
+            }
+            if (pageRepos.length < 100) break
+          } else {
+            break
+          }
+        } else {
+          break
+        }
       }
+    }
+
+    // Also fetch public repos for username if not already fetched or if token is public-only
+    if (username && username !== 'developer') {
+      for (let page = 1; page <= 5; page++) {
+        const fetchUrl = `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated&per_page=100&page=${page}`
+        const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'CodeGenome-AI' }
+        if (token) headers['Authorization'] = `Bearer ${token}`
+
+        const reposRes = await fetch(fetchUrl, { headers })
+        if (reposRes.ok) {
+          const pageRepos = await reposRes.json()
+          if (Array.isArray(pageRepos) && pageRepos.length > 0) {
+            for (const r of pageRepos) {
+              if (r.full_name && !repoMap.has(r.full_name)) {
+                repoMap.set(r.full_name, r)
+              }
+            }
+            if (pageRepos.length < 100) break
+          } else {
+            break
+          }
+        } else {
+          break
+        }
+      }
+    }
+
+    const rawList = Array.from(repoMap.values())
+    if (rawList.length > 0) {
+      // Sort by updated_at descending
+      rawList.sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())
+
+      const mapped = rawList.map((r) => ({
+        name: r.name,
+        fullName: r.full_name,
+        owner: r.owner?.login || username,
+        private: Boolean(r.private),
+        url: r.html_url,
+        description: r.description || `Repository owned by ${r.owner?.login || username}`,
+        language: r.language || 'TypeScript',
+        stars: r.stargazers_count || 0,
+        updatedAt: r.updated_at,
+      }))
+      return res.json({ repositories: mapped })
     }
   } catch (err) {
     console.warn('[Server] Error fetching GitHub repos:', err.message)
@@ -278,7 +337,7 @@ authRouter.get('/auth/repos', async (req, res) => {
       language: 'TypeScript',
       stars: 42,
       updatedAt: new Date().toISOString(),
-    }
+    },
   ]
   res.json({ repositories: fallbackRepos })
 })
