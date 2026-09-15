@@ -57,7 +57,7 @@ export async function createPullRequest({
       prUrl: `https://github.com/${owner}/${repository}`,
       patch,
       cliCommand,
-      message: 'PR patch generated! Please Sign in with GitHub to automatically push branches and submit Pull Requests.',
+      message: 'PR patch generated! Connect your GitHub Personal Access Token (PAT) in the login menu to automatically push branches and submit live Pull Requests.',
     }
   }
 

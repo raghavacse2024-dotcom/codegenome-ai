@@ -104,11 +104,21 @@ Guidelines:
   if (isValidKey(process.env.GEMINI_API_KEY)) {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-      const prompt = `${systemPrompt}\n\nUser Question: ${question}`
+      const contents = []
+      contents.push({ role: 'user', parts: [{ text: systemPrompt }] })
+      contents.push({ role: 'model', parts: [{ text: 'Understood. I am CodeGenome AI assistant, ready to answer questions about this repository.' }] })
+      for (const m of history) {
+        contents.push({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }],
+        })
+      }
+      contents.push({ role: 'user', parts: [{ text: question }] })
 
+      const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
       const callPromise = ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: prompt,
+        model: modelName,
+        contents,
       })
 
       const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 20_000))
@@ -130,7 +140,9 @@ Guidelines:
   // 3. Smart Fallback generator if no API keys configured or call failed
   let fallbackText = `Based on repository analysis of **${repoName}**, the priority recommendation is to refactor \`${target}\`.`
 
-  if (q.includes('architecture') || q.includes('structure') || q.includes('framework')) {
+  if (/^(hi|hello|hey|greetings|who are you|what can you do|help)/i.test(question.trim())) {
+    fallbackText = `Hello! I am **CodeGenome AI**, your senior repository architecture and refactoring assistant.\n\nI have analyzed **${repoName}**:\n- **Primary Refactor Target**: \`${target}\`\n- **Tech Stack**: ${arch.framework || 'TypeScript / Node.js'}\n\nAsk me anything! For example:\n- *"How do I refactor ${target}?"*\n- *"What is the architectural structure?"*\n- *"Explain the technical debt hotspots."*`
+  } else if (q.includes('architecture') || q.includes('structure') || q.includes('framework')) {
     const layersStr = arch.layers?.join(' -> ') || 'Presentation -> Services -> Integrations'
     fallbackText = `Repository **${repoName}** is built with **${arch.framework || 'TypeScript / Node.js'}**.\n\n### Architectural Layers:\n\`${layersStr}\`\n\n- **Entry Points**: ${arch.structure?.entryPoints?.join(', ') || 'src/main.ts'}\n- **Violations**: ${arch.violations?.length ? arch.violations[0] : 'None detected. Good separation of concerns.'}`
   } else if (q.includes('debt') || q.includes('hotspot') || q.includes('complex')) {

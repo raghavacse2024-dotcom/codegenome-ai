@@ -2,6 +2,7 @@ import type { Analysis, GitHubUser, QaAnswer, UserRepo, AgentEvent } from '../ty
 
 const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 const SESSION_STORAGE_KEY = 'codegenome_github_session'
+const PAT_STORAGE_KEY = 'codegenome_github_pat'
 
 export function getSessionToken(): string | null {
   try {
@@ -21,6 +22,24 @@ export function setSessionToken(token: string | null) {
   } catch {}
 }
 
+export function getGitHubPat(): string | null {
+  try {
+    return localStorage.getItem(PAT_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setGitHubPat(pat: string | null) {
+  try {
+    if (pat) {
+      localStorage.setItem(PAT_STORAGE_KEY, pat)
+    } else {
+      localStorage.removeItem(PAT_STORAGE_KEY)
+    }
+  } catch {}
+}
+
 /**
  * Runs a fetch request with a browser-side timeout, auth token header, and user-friendly errors.
  */
@@ -28,7 +47,11 @@ async function request<T>(path: string, init: RequestInit, timeoutMs = 60_000): 
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
   const token = getSessionToken()
-  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+  const pat = getGitHubPat()
+  const authHeaders: Record<string, string> = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(pat ? { 'X-GitHub-Token': pat } : {}),
+  }
 
   try {
     const response = await fetch(`${API_URL}${path}`, {
@@ -316,6 +339,10 @@ export async function logoutUser() {
     await request('/api/auth/logout', { method: 'POST' })
   } finally {
     setSessionToken(null)
+    setGitHubPat(null)
+    try {
+      localStorage.removeItem('codegenome_github_user')
+    } catch {}
   }
 }
 

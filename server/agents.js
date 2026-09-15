@@ -58,8 +58,9 @@ Files: ${context.files.map((f) => f.path).slice(0, 15).join(', ')}
 Deterministic baseline:
 ${JSON.stringify(deterministic)}`
 
+      const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
       const callPromise = ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+        model: modelName,
         contents: prompt,
         config: { responseMimeType: 'application/json' }
       })

@@ -13,9 +13,11 @@ import {
   Terminal,
   FileCode,
   Loader2,
+  Key,
 } from 'lucide-react'
 import type { Analysis, PullRequestResult } from '../types'
 import { createAutomatedPullRequest, downloadGitPatch } from '../services/apiService'
+import { GitHubAuthModal } from './GitHubAuthModal'
 
 interface AutomatedPrModalProps {
   analysis: Analysis
@@ -41,6 +43,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PullRequestResult | null>(null)
   const [copiedCli, setCopiedCli] = useState(false)
+  const [showAuthModal, setShowAuthModal] = useState(false)
 
   // Close modal on Escape
   useEffect(() => {
@@ -183,6 +186,18 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                   </a>
                 )}
 
+                {result.mode === 'simulated' && (
+                  <button
+                    type="button"
+                    className="pr-btn pr-btn--secondary"
+                    onClick={() => setShowAuthModal(true)}
+                    style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                  >
+                    <Key size={14} />
+                    <span>Connect GitHub Token (PAT)</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   className="pr-btn pr-btn--secondary"
@@ -312,6 +327,17 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
           )}
         </div>
       </motion.div>
+
+      <GitHubAuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={() => {
+          setShowAuthModal(false)
+          // Re-submit PR request with newly attached token
+          const fakeEvt = { preventDefault: () => {} } as React.FormEvent
+          handleSubmit(fakeEvt)
+        }}
+      />
     </div>
   )
 }

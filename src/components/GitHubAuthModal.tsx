@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { GitBranch, Lock, AlertCircle, Globe } from 'lucide-react'
+import { GitBranch, Lock, AlertCircle, Globe, Key } from 'lucide-react'
 import type { GitHubUser } from '../types'
-import { getGitHubAuthUrl, setSessionToken, registerSession } from '../services/apiService'
+import { getGitHubAuthUrl, setSessionToken, setGitHubPat, registerSession, authenticateWithToken } from '../services/apiService'
 import { auth, googleProvider, signInWithPopup } from '../services/firebase'
 
 interface GitHubAuthModalProps {
@@ -14,12 +14,43 @@ interface GitHubAuthModalProps {
 export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [patInput, setPatInput] = useState('')
+  const [showPatInput, setShowPatInput] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
       setError(null)
     }
   }, [isOpen])
+
+  const handlePatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const clean = patInput.trim()
+    if (!clean) {
+      setError('Please paste your GitHub Personal Access Token.')
+      return
+    }
+    setLoading(true)
+    setError(null)
+
+    try {
+      const res = await authenticateWithToken(clean)
+      if (res && res.user) {
+        setSessionToken(res.sessionId)
+        setGitHubPat(clean)
+        registerSession(res.sessionId, res.user, clean)
+        try {
+          localStorage.setItem('codegenome_github_user', JSON.stringify(res.user))
+        } catch {}
+        onSuccess(res.user)
+        onClose()
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Invalid GitHub token. Please verify permissions.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // Listen for postMessage from OAuth popup
   useEffect(() => {
@@ -260,6 +291,65 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
               </svg>
               <span>Or sign in with Google</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setShowPatInput(!showPatInput)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#38bdf8',
+                fontSize: '12px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                marginTop: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <Key size={13} />
+              <span>{showPatInput ? 'Hide Personal Access Token option' : 'Have a GitHub Personal Access Token (PAT)?'}</span>
+            </button>
+
+            {showPatInput && (
+              <form onSubmit={handlePatSubmit} style={{ width: '100%', marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <input
+                  type="password"
+                  placeholder="Paste GitHub PAT (ghp_... or github_pat_...)"
+                  value={patInput}
+                  onChange={(e) => setPatInput(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    background: 'rgba(0,0,0,0.5)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    borderRadius: '8px',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    background: '#0284c7',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: '#ffffff',
+                    fontWeight: '600',
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {loading ? 'Validating Token...' : 'Connect GitHub Token'}
+                </button>
+              </form>
+            )}
           </div>
         </div>
 

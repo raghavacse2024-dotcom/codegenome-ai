@@ -34,7 +34,11 @@ prRouter.post('/pr/create', async (req, res, next) => {
     // Resolve user auth token
     let token = null
     const authHeader = req.headers.authorization
-    if (authHeader?.startsWith('Bearer ')) {
+    const customPat = req.headers['x-github-token']
+
+    if (customPat && typeof customPat === 'string' && customPat.trim().length > 5) {
+      token = customPat.trim()
+    } else if (authHeader?.startsWith('Bearer ')) {
       const raw = authHeader.slice(7).trim()
       token = raw.startsWith('cg_') ? getStoredToken(raw) : raw
     }
