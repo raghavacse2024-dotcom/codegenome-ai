@@ -162,27 +162,34 @@ function escapeHtml(str) {
 }
 
 if (process.env.NODE_ENV !== 'production') {
-  const { createServer: createViteServer } = await import('vite')
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa',
-    root,
-  })
-  app.use(vite.middlewares)
-  app.use('*', async (req, res, next) => {
-    const url = req.originalUrl
-    try {
-      let template = await fs.promises.readFile(path.resolve(root, 'index.html'), 'utf-8')
-      template = await vite.transformIndexHtml(url, template)
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(template)
-    } catch (e) {
-      vite.ssrFixStacktrace(e)
-      next(e)
+  try {
+    const { createServer: createViteServer } = await import('vite')
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+      root,
+    })
+    app.use(vite.middlewares)
+  } catch (err) {
+    console.warn('[Server] Vite middleware fallback:', err?.message)
+    const distPath = path.join(root, 'dist')
+    if (fs.existsSync(path.join(distPath, 'index.html'))) {
+      app.use(express.static(distPath))
+      app.get('*', (_, response) => response.sendFile(path.join(distPath, 'index.html')))
+    } else {
+      app.use(express.static(root))
+      app.get('*', (_, response) => response.sendFile(path.join(root, 'index.html')))
     }
-  })
+  }
 } else {
-  app.use(express.static(path.join(root, 'dist')))
-  app.get('*', (_, response) => response.sendFile(path.join(root, 'dist', 'index.html')))
+  const distPath = path.join(root, 'dist')
+  if (fs.existsSync(path.join(distPath, 'index.html'))) {
+    app.use(express.static(distPath))
+    app.get('*', (_, response) => response.sendFile(path.join(distPath, 'index.html')))
+  } else {
+    app.use(express.static(root))
+    app.get('*', (_, response) => response.sendFile(path.join(root, 'index.html')))
+  }
 }
 
 app.use((error, request, response, next) => {

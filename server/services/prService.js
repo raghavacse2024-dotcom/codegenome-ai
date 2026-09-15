@@ -211,3 +211,4 @@ export async function createPullRequest({
     cliCommand,
     message: `Pull Request bundle successfully created for @${userLogin}! Branch '${safeBranch}' prepared. Click 'Review & Compare on GitHub' to submit.`,
   }
+}
