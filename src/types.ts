@@ -84,6 +84,7 @@ export type RefactorGitDiff = {
 export type PullRequestResult = {
   success: boolean
   mode: 'live' | 'simulated'
+  pushed?: boolean
   prUrl?: string
   prNumber?: number
   branch: string

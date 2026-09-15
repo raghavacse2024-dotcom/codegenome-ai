@@ -176,6 +176,7 @@ export async function createPullRequest({
                   return {
                     success: true,
                     mode: 'live',
+                    pushed: true,
                     prUrl: prResult.html_url,
                     prNumber: prResult.number,
                     branch: safeBranch,
@@ -184,6 +185,22 @@ export async function createPullRequest({
                     body: prBody,
                     cliCommand,
                     message: `Successfully created Pull Request #${prResult.number} on GitHub!`,
+                  }
+                } else {
+                  // Created branch on GitHub successfully, but PR opening needs confirmation
+                  const prError = await prRes.json().catch(() => ({}))
+                  const compareUrl = `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${headRef}`
+                  return {
+                    success: true,
+                    mode: 'live',
+                    pushed: true,
+                    prUrl: compareUrl,
+                    branch: safeBranch,
+                    baseBranch: targetBaseBranch,
+                    title: prTitle,
+                    body: prBody,
+                    cliCommand,
+                    message: `Branch '${safeBranch}' successfully created and pushed to GitHub! Click to review and open your Pull Request.`,
                   }
                 }
               }
@@ -196,19 +213,18 @@ export async function createPullRequest({
     }
   }
 
-  // Fallback / standard user login PR generation: works based entirely on user login!
-  const compareUrl = `https://github.com/${owner}/${repository}/compare/${defaultBranch}...${userLogin}:${safeBranch}`
-
+  // Fallback when no write token is provided or live API push is unavailable
   return {
     success: true,
-    mode: 'live',
+    mode: 'simulated',
+    pushed: false,
+    prUrl: null,
     branch: safeBranch,
     baseBranch: defaultBranch,
     title: prTitle,
     body: prBody,
-    prUrl: compareUrl,
     patch,
     cliCommand,
-    message: `Pull Request bundle successfully created for @${userLogin}! Branch '${safeBranch}' prepared. Click 'Review & Compare on GitHub' to submit.`,
+    message: `Refactor bundle prepared for branch '${safeBranch}'. Connect a GitHub Access Token (PAT) with 'repo' scope to push this branch directly to GitHub, or apply locally using Git CLI.`,
   }
 }
