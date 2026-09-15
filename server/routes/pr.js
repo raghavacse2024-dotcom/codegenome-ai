@@ -31,16 +31,23 @@ prRouter.post('/pr/create', async (req, res, next) => {
       return res.status(400).json({ error: 'Analysis record does not contain valid repository details.' })
     }
 
-    // Resolve user auth token
+    // Resolve user auth token & user profile
     let token = null
+    let user = null
     const authHeader = req.headers.authorization
     const customPat = req.headers['x-github-token']
 
+    if (authHeader?.startsWith('Bearer ')) {
+      const raw = authHeader.slice(7).trim()
+      if (raw.startsWith('cg_')) {
+        token = getStoredToken(raw)
+        user = getStoredUser(raw)
+      } else {
+        token = raw
+      }
+    }
     if (customPat && typeof customPat === 'string' && customPat.trim().length > 5) {
       token = customPat.trim()
-    } else if (authHeader?.startsWith('Bearer ')) {
-      const raw = authHeader.slice(7).trim()
-      token = raw.startsWith('cg_') ? getStoredToken(raw) : raw
     }
 
     const refactorData = analysis.results?.refactor?.data || {}
@@ -72,6 +79,7 @@ prRouter.post('/pr/create', async (req, res, next) => {
       files: filesToCommit,
       patch: rawPatch,
       token,
+      user,
     })
 
     res.json(result)

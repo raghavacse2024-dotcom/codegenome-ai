@@ -179,23 +179,11 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                   >
                     <ExternalLink size={14} />
                     <span>
-                      {result.mode === 'live'
-                        ? `View PR #${result.prNumber || ''} on GitHub`
-                        : 'Review & Compare on GitHub'}
+                      {result.prNumber
+                        ? `View PR #${result.prNumber} on GitHub`
+                        : 'Review & Submit PR on GitHub'}
                     </span>
                   </a>
-                )}
-
-                {result.mode === 'simulated' && (
-                  <button
-                    type="button"
-                    className="pr-btn pr-btn--secondary"
-                    onClick={() => setShowAuthModal(true)}
-                    style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
-                  >
-                    <Key size={14} />
-                    <span>Connect GitHub Token (PAT)</span>
-                  </button>
                 )}
 
                 <button
