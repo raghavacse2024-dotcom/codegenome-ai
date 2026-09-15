@@ -89,6 +89,13 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
         if (!popup) {
           setError('Popup blocked by browser. Please enable popups to sign in.')
           setLoading(false)
+        } else {
+          const timer = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(timer)
+              setLoading(false)
+            }
+          }, 500)
         }
         return
       }
@@ -100,6 +107,12 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
         'width=600,height=720,menubar=no,toolbar=no,status=no'
       )
       if (fallbackPopup) {
+        const timer = setInterval(() => {
+          if (fallbackPopup.closed) {
+            clearInterval(timer)
+            setLoading(false)
+          }
+        }, 500)
         fallbackPopup.document.write(`
           <!DOCTYPE html>
           <html>
