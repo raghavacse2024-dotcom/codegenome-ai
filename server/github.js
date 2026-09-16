@@ -1,7 +1,10 @@
 import JSZip from 'jszip'
 import { parseRepositoryUrl } from './contracts.js'
 import { createDemoRepository } from './services/demoCacheService.js'
-const MAX_FILES = 25, MAX_FILE_BYTES = 45_000
+const MAX_FILE_BYTES = 45_000
+const getLimitFiles = (customToken) => {
+  return getCleanToken(customToken) ? 100 : 25
+}
 const CODE_EXTENSIONS = /\.(?:js|jsx|ts|tsx|py|java|go|rb|php|cs|rs|vue|svelte|css|html|sql)$/i
 const LANGUAGE_BY_EXTENSION = { js: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript', py: 'Python', java: 'Java', go: 'Go', rb: 'Ruby', php: 'PHP', cs: 'C#', rs: 'Rust', vue: 'Vue', svelte: 'Svelte', css: 'CSS', html: 'HTML', sql: 'SQL' }
 
@@ -48,6 +51,7 @@ async function fetchRepositoryArchive(owner, repository, customToken) {
   const branchCandidates = ['main', 'master']
   let lastFailure = null
   const authHeaders = headers(customToken)
+  const limit = getLimitFiles(customToken)
   for (const branch of branchCandidates) {
     try {
       const response = await fetch(`https://api.github.com/repos/${owner}/${repository}/zipball/${branch}`, {
@@ -76,14 +80,14 @@ async function fetchRepositoryArchive(owner, repository, customToken) {
         const content = (await entry.async('string')).slice(0, MAX_FILE_BYTES)
         if (!content) continue
         files.push({ path, size: content.length, content })
-        if (files.length >= MAX_FILES) break
+        if (files.length >= limit) break
       }
       if (files.length) {
         return {
           repo: { owner, repository, url: `https://github.com/${owner}/${repository}`, description: '', stars: 0, defaultBranch: branch },
           files,
           structure: buildStructure(files),
-          truncated: files.length >= MAX_FILES,
+          truncated: files.length >= limit,
         }
       }
       lastFailure = new Error(`GitHub archive for ${branch} did not contain supported source files.`)
@@ -110,10 +114,11 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
   }
 
   try {
+    const limit = getLimitFiles(customToken)
     const metadata = await githubFetch(`/repos/${owner}/${repository}`, tokenForReq)
     const branch = metadata.default_branch || 'main'
     const tree = await githubFetch(`/repos/${owner}/${repository}/git/trees/${encodeURIComponent(branch)}?recursive=1`, tokenForReq)
-    const candidates = (tree.tree || []).filter((item) => item.type === 'blob' && CODE_EXTENSIONS.test(item.path) && item.size <= MAX_FILE_BYTES).slice(0, MAX_FILES)
+    const candidates = (tree.tree || []).filter((item) => item.type === 'blob' && CODE_EXTENSIONS.test(item.path) && item.size <= MAX_FILE_BYTES).slice(0, limit)
     const files = await Promise.all(candidates.map(async (item) => {
       try {
         // If private repository, fetch blob via GitHub API with token
@@ -135,7 +140,7 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
       repo: { owner, repository, url, description: metadata.description || '', stars: metadata.stargazers_count || 0, defaultBranch: branch, private: Boolean(metadata.private) }, 
       files: sampledFiles, 
       structure: buildStructure(sampledFiles), 
-      truncated: (tree.tree || []).length > MAX_FILES 
+      truncated: (tree.tree || []).length > limit 
     }
     if (!isTesting) {
       repositoryCache.set(cacheKey, { timestamp: Date.now(), data: result })

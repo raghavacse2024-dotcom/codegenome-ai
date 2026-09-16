@@ -21,7 +21,7 @@ const QUICK_SUGGESTIONS = [
 ]
 
 /**
- * Interactive Repository Chatbot AI connected to Gemini model via server API.
+ * Interactive Repository Chatbot AI powered by grounded Codebase Intelligence.
  */
 export function RepositoryQA({ analysisId }: { analysisId: string }) {
   const [question, setQuestion] = useState('')
@@ -30,10 +30,10 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
       id: 'init-1',
       role: 'assistant',
       content:
-        'Hello! I am your **Gemini 3.8 Flash** powered Repository AI Chatbot. Ask me anything about this repository’s architecture, technical debt hotspots, cost valuations, or step-by-step refactoring strategy.',
+        'Hello! I am **CodeGenome AI**, your senior repository architecture and refactoring assistant. Ask me anything about this repository’s architecture, technical debt hotspots, cost valuations, or step-by-step refactoring strategy.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       confidence: 1.0,
-      provider: 'Gemini 3.8 Flash',
+      provider: 'CodeGenome AI',
     },
   ])
   const [loading, setLoading] = useState(false)
@@ -74,7 +74,7 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         confidence: res.confidence,
         sourceFiles: res.sourceFiles,
-        provider: (res as any).provider || 'Gemini 3.8 Flash',
+        provider: 'CodeGenome AI',
       }
       setMessages((prev) => [...prev, botMsg])
     } catch (err: any) {
@@ -98,7 +98,7 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
         content: 'Chat history cleared. What would you like to explore in this repository?',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         confidence: 1.0,
-        provider: 'Gemini 3.8 Flash',
+        provider: 'CodeGenome AI',
       },
     ])
     setError('')
@@ -117,6 +117,30 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
         minHeight: '420px',
       }}
     >
+      <style>{`
+        .no-scrollbar::-webkit-scrollbar {
+          display: none !important;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+        .sleek-scrollbar::-webkit-scrollbar {
+          width: 5px !important;
+          height: 5px !important;
+        }
+        .sleek-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.01) !important;
+        }
+        .sleek-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.1) !important;
+          border-radius: 10px !important;
+        }
+        .sleek-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.2) !important;
+        }
+      `}</style>
+
       {/* Header */}
       <div
         className="qa-chatbot-header"
@@ -152,12 +176,12 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
                   fontWeight: '700',
                   padding: '2px 6px',
                   borderRadius: '4px',
-                  background: 'rgba(66, 133, 244, 0.2)',
-                  color: '#60a5fa',
-                  border: '1px solid rgba(66, 133, 244, 0.3)',
+                  background: 'rgba(34, 197, 94, 0.15)',
+                  color: 'var(--neon)',
+                  border: '1px solid rgba(34, 197, 94, 0.25)',
                 }}
               >
-                Gemini 3.8 Flash API
+                AI Engine v2.0
               </span>
             </div>
             <span style={{ fontSize: '10.5px', color: 'var(--muted)', fontFamily: 'DM Mono, monospace' }}>
@@ -189,6 +213,7 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
 
       {/* Quick Prompt Chips */}
       <div
+        className="no-scrollbar"
         style={{
           display: 'flex',
           gap: '6px',
@@ -227,7 +252,7 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
 
       {/* Chat Messages Stream */}
       <div
-        className="qa-chat-feed"
+        className="qa-chat-feed sleek-scrollbar"
         style={{
           flex: 1,
           padding: '16px',
@@ -301,7 +326,7 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
                       color: msg.role === 'user' ? '#60a5fa' : 'var(--neon)',
                     }}
                   >
-                    {msg.role === 'user' ? 'YOU' : 'GEMINI AI CHATBOT'}
+                    {msg.role === 'user' ? 'YOU' : 'CODEGENOME AI'}
                   </span>
                   <span
                     style={{
@@ -409,7 +434,7 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
               }}
             >
               <span className="spinner" aria-hidden="true" />
-              <span>Gemini 3.8 Flash analyzing repository context...</span>
+              <span>Analyzing codebase context...</span>
             </div>
           </div>
         )}
@@ -436,7 +461,7 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
           className="qa-input"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ask Gemini chatbot about code architecture, hotspots, or refactor steps..."
+          placeholder="Ask CodeGenome AI about code architecture, hotspots, or refactor steps..."
           disabled={loading}
           style={{ flex: 1, padding: '12px 14px', borderRadius: '8px', fontSize: '13px' }}
         />

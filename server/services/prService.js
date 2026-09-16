@@ -46,12 +46,12 @@ export async function createPullRequest({
 
   const cliCommand = `git checkout -b ${safeBranch} && git apply --whitespace=fix patch.diff`
   const userLogin = user?.login || 'arulraghav07'
+  let apiUserLogin = userLogin
 
   // If live GitHub token is present, attempt live push & pull request creation via GitHub REST API
   if (cleanToken && owner.toLowerCase() !== 'demo') {
     try {
       // Get authenticated user info
-      let apiUserLogin = userLogin
       const userRes = await fetch('https://api.github.com/user', {
         headers: githubHeaders(cleanToken),
         signal: AbortSignal.timeout(8_000),
@@ -231,7 +231,9 @@ export async function createPullRequest({
 
   // Fallback when live API push token is restricted or unavailable:
   // Provide a pre-populated GitHub PR compare link so the logged-in user can submit PR with 1 click
-  const compareUrl = `https://github.com/${owner}/${repository}/compare/${defaultBranch}...${safeBranch}`
+  const isCrossFork = apiUserLogin && apiUserLogin.toLowerCase() !== owner.toLowerCase()
+  const headRef = isCrossFork ? `${apiUserLogin}:${safeBranch}` : safeBranch
+  const compareUrl = `https://github.com/${owner}/${repository}/compare/${defaultBranch}...${headRef}`
 
   return {
     success: true,
