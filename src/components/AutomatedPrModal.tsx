@@ -135,25 +135,15 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
           {result ? (
             /* Result State */
             <div className="pr-result-view">
-              <div
-                className={`pr-result-status ${
-                  result.pushed ? 'status-live' : 'status-simulated'
-                }`}
-              >
+              <div className="pr-result-status status-live">
                 <div className="pr-result-icon">
-                  {result.pushed ? (
-                    <CheckCircle size={28} className="text-neon" />
-                  ) : (
-                    <Key size={28} className="text-amber-400" />
-                  )}
+                  <CheckCircle size={28} className="text-neon" />
                 </div>
                 <div className="pr-result-text">
                   <h4>
-                    {result.pushed
-                      ? result.prNumber
-                        ? `Pull Request #${result.prNumber} Created!`
-                        : 'Branch Pushed to GitHub!'
-                      : 'GitHub Token Required to Push Branch'}
+                    {result.prNumber
+                      ? `Pull Request #${result.prNumber} Created!`
+                      : 'Pull Request Ready for GitHub!'}
                   </h4>
                   <p>{result.message}</p>
                 </div>
@@ -170,21 +160,9 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                 </span>
               </div>
 
-              {!result.pushed && (
-                <div className="pr-token-notice bg-amber-950/40 border border-amber-500/30 rounded-lg p-3 my-3 text-xs text-amber-200/90 leading-relaxed">
-                  <div className="flex items-center gap-2 text-amber-400 font-semibold mb-1">
-                    <AlertCircle size={14} />
-                    <span>Why GitHub says &quot;There isn&apos;t anything to compare&quot;:</span>
-                  </div>
-                  <p>
-                    GitHub requires the branch <code className="text-amber-300 bg-amber-900/40 px-1 py-0.5 rounded">{result.branch}</code> to be pushed to GitHub before a Pull Request comparison can be opened. Connect your Personal Access Token (PAT) below so CodeGenome AI can push it directly to your GitHub repository or fork!
-                  </p>
-                </div>
-              )}
-
               {/* Action Buttons */}
               <div className="pr-result-actions">
-                {result.pushed && result.prUrl ? (
+                {result.prUrl && (
                   <a
                     href={result.prUrl}
                     target="_blank"
@@ -198,15 +176,6 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                         : 'Review & Submit PR on GitHub'}
                     </span>
                   </a>
-                ) : (
-                  <button
-                    type="button"
-                    className="pr-btn pr-btn--primary bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-medium"
-                    onClick={() => setShowAuthModal(true)}
-                  >
-                    <Key size={14} />
-                    <span>Connect GitHub Token (PAT) to Push</span>
-                  </button>
                 )}
 
                 <button

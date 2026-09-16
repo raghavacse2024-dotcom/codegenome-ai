@@ -60,53 +60,30 @@ Guidelines:
 3. Use clean Markdown formatting with bold text, bullet points, and code blocks (\`\`\`ts) whenever sharing code examples.
 4. Keep explanations clear, engaging, and professional.`
 
-  // 1. Try Z.ai / OpenAI provider if key exists
-  if (isValidKey(process.env.OPENAI_API_KEY) && process.env.OPENAI_MODEL) {
+  // 1. Primary: Try Gemini 3.8 Flash model via @google/genai SDK
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (isValidKey(geminiKey)) {
     try {
-      const client = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-        ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
+      const ai = new GoogleGenAI({
+        apiKey: geminiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
       })
 
-      const formattedHistory = history.map((m) => ({
-        role: m.role === 'assistant' ? 'assistant' : 'user',
-        content: m.content,
-      }))
-
-      const messages = [
-        { role: 'system', content: systemPrompt },
-        ...formattedHistory,
-        { role: 'user', content: question },
-      ]
-
-      const callPromise = client.chat.completions.create({
-        model: process.env.OPENAI_MODEL,
-        messages,
-      })
-
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 20_000))
-      const result = await Promise.race([callPromise, timeoutPromise])
-      const content = result.choices?.[0]?.message?.content?.trim()
-
-      if (content) {
-        return {
-          answer: content,
-          confidence: 0.98,
-          sourceFiles: sourceFiles.length ? sourceFiles : [target],
-        }
-      }
-    } catch (err) {
-      console.error('[QA Router] OpenAI/Z.ai query error:', err?.message)
-    }
-  }
-
-  // 2. Try Gemini provider if key exists
-  if (isValidKey(process.env.GEMINI_API_KEY)) {
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
       const contents = []
       contents.push({ role: 'user', parts: [{ text: systemPrompt }] })
-      contents.push({ role: 'model', parts: [{ text: 'Understood. I am CodeGenome AI assistant, ready to answer questions about this repository.' }] })
+      contents.push({
+        role: 'model',
+        parts: [
+          {
+            text: `Understood! I am CodeGenome AI Repository Chatbot. I am fully grounded in the architectural blueprint, hotspot metrics, technical debt score, and refactoring plan for **${repoName}**. How can I help you?`,
+          },
+        ],
+      })
+
       for (const m of history) {
         contents.push({
           role: m.role === 'assistant' ? 'model' : 'user',
@@ -115,13 +92,13 @@ Guidelines:
       }
       contents.push({ role: 'user', parts: [{ text: question }] })
 
-      const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+      const modelName = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
       const callPromise = ai.models.generateContent({
         model: modelName,
         contents,
       })
 
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 20_000))
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini API timeout')), 20_000))
       const response = await Promise.race([callPromise, timeoutPromise])
       const text = response.text?.trim()
 
@@ -130,12 +107,16 @@ Guidelines:
           answer: text,
           confidence: 0.98,
           sourceFiles: sourceFiles.length ? sourceFiles : [target],
+          provider: 'Gemini 3.8 Flash',
         }
       }
     } catch (err) {
       console.error('[QA Router] Gemini query error:', err?.message)
     }
   }
+
+  // 2. Secondary: OpenAI provider fallback if configured
+  if (isValidKey(process.env.OPENAI_API_KEY) && process.env.OPENAI_MODEL) {
 
   // 3. Smart Fallback generator if no API keys configured or call failed
   let fallbackText = `Based on repository analysis of **${repoName}**, the priority recommendation is to refactor \`${target}\`.`

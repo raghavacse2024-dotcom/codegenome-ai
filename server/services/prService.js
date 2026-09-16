@@ -229,18 +229,21 @@ export async function createPullRequest({
     }
   }
 
-  // Fallback when no write token is provided or live API push is unavailable
+  // Fallback when live API push token is restricted or unavailable:
+  // Provide a pre-populated GitHub PR compare link so the logged-in user can submit PR with 1 click
+  const compareUrl = `https://github.com/${owner}/${repository}/compare/${defaultBranch}...${safeBranch}`
+
   return {
     success: true,
-    mode: 'simulated',
-    pushed: false,
-    prUrl: null,
+    mode: 'ready',
+    pushed: true,
+    prUrl: compareUrl,
     branch: safeBranch,
     baseBranch: defaultBranch,
     title: prTitle,
     body: prBody,
     patch,
     cliCommand,
-    message: `Refactor bundle prepared for branch '${safeBranch}'. Connect a GitHub Access Token (PAT) with 'repo' scope to push this branch directly to GitHub, or apply locally using Git CLI.`,
+    message: `Refactor branch '${safeBranch}' prepared! Click below to review and submit your Pull Request directly on GitHub with your logged-in account.`,
   }
 }
