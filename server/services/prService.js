@@ -56,196 +56,202 @@ export async function createPullRequest({
         headers: githubHeaders(cleanToken),
         signal: AbortSignal.timeout(8_000),
       })
-      if (userRes.ok) {
-        const userData = await userRes.json()
-        apiUserLogin = userData.login
+      if (!userRes.ok) {
+        throw new Error(`Failed to verify user token (${userRes.status})`)
       }
+      const userData = await userRes.json()
+      apiUserLogin = userData.login
 
       // Query repository metadata and permissions
       const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repository}`, {
         headers: githubHeaders(cleanToken),
         signal: AbortSignal.timeout(8_000),
       })
+      if (!repoRes.ok) {
+        throw new Error(`Failed to fetch metadata for ${owner}/${repository} (${repoRes.status})`)
+      }
+      const repoData = await repoRes.json()
+      const targetBaseBranch = repoData.default_branch || defaultBranch
+      const canPush = Boolean(repoData.permissions?.push || repoData.permissions?.admin)
 
-      if (repoRes.ok) {
-        const repoData = await repoRes.json()
-        const targetBaseBranch = repoData.default_branch || defaultBranch
-        const canPush = Boolean(repoData.permissions?.push || repoData.permissions?.admin)
+      let targetOwner = owner
+      let isCrossFork = false
 
-        let targetOwner = owner
-        let isCrossFork = false
+      if (!canPush && apiUserLogin) {
+        isCrossFork = true
+        targetOwner = apiUserLogin
 
-        if (!canPush && apiUserLogin) {
-          isCrossFork = true
-          targetOwner = apiUserLogin
+        // Fork repository to user's account
+        const forkRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/forks`, {
+          method: 'POST',
+          headers: githubHeaders(cleanToken),
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (!forkRes.ok && forkRes.status !== 202) {
+          throw new Error(`Failed to initiate repository fork (${forkRes.status})`)
+        }
 
-          // Fork repository to user's account
-          await fetch(`https://api.github.com/repos/${owner}/${repository}/forks`, {
-            method: 'POST',
+        // Poll up to 6 times (up to 12s) to ensure fork repository is created and ready
+        let forkReady = false
+        for (let attempt = 0; attempt < 6; attempt++) {
+          await new Promise((r) => setTimeout(r, 2000))
+          const checkFork = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}`, {
             headers: githubHeaders(cleanToken),
-            signal: AbortSignal.timeout(10_000),
-          }).catch(() => {})
-
-          // Poll up to 6 times (up to 12s) to ensure fork repository is created and ready
-          let forkReady = false
-          for (let attempt = 0; attempt < 6; attempt++) {
-            await new Promise((r) => setTimeout(r, 2000))
-            const checkFork = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}`, {
-              headers: githubHeaders(cleanToken),
-              signal: AbortSignal.timeout(5_000),
-            })
-            if (checkFork.ok) {
-              forkReady = true
-              break
-            }
-          }
-
-          if (!forkReady) {
-            console.warn(`[PR Service] Fork ${targetOwner}/${repository} creation timed out.`)
+            signal: AbortSignal.timeout(5_000),
+          })
+          if (checkFork.ok) {
+            forkReady = true
+            break
           }
         }
 
-        // Get reference commit of base branch
-        const refRes = await fetch(
-          `https://api.github.com/repos/${owner}/${repository}/git/ref/heads/${encodeURIComponent(targetBaseBranch)}`,
-          { headers: githubHeaders(cleanToken), signal: AbortSignal.timeout(8_000) }
-        )
+        if (!forkReady) {
+          throw new Error(`Fork repository ${targetOwner}/${repository} creation timed out.`)
+        }
+      }
 
-        if (refRes.ok) {
-          const refData = await refRes.json()
-          const baseCommitSha = refData.object.sha
+      // Get reference commit of base branch
+      const refRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repository}/git/ref/heads/${encodeURIComponent(targetBaseBranch)}`,
+        { headers: githubHeaders(cleanToken), signal: AbortSignal.timeout(8_000) }
+      )
+      if (!refRes.ok) {
+        throw new Error(`Failed to get ref commit for base branch ${targetBaseBranch} (${refRes.status})`)
+      }
+      const refData = await refRes.json()
+      const baseCommitSha = refData.object.sha
 
-          // Get base commit tree
-          const commitRes = await fetch(
-            `https://api.github.com/repos/${owner}/${repository}/git/commits/${baseCommitSha}`,
-            { headers: githubHeaders(cleanToken), signal: AbortSignal.timeout(8_000) }
-          )
-          const commitData = await commitRes.json()
-          const baseTreeSha = commitData.tree.sha
+      // Get base commit tree
+      const commitRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repository}/git/commits/${baseCommitSha}`,
+        { headers: githubHeaders(cleanToken), signal: AbortSignal.timeout(8_000) }
+      )
+      if (!commitRes.ok) {
+        throw new Error(`Failed to fetch base commit details (${commitRes.status})`)
+      }
+      const commitData = await commitRes.json()
+      const baseTreeSha = commitData.tree.sha
 
-          // Create new Git tree with all files
-          const treePayload = {
-            base_tree: baseTreeSha,
-            tree: files.map((f) => ({
-              path: f.path,
-              mode: '100644',
-              type: 'blob',
-              content: f.content,
-            })),
-          }
+      // Create new Git tree with all files
+      const treePayload = {
+        base_tree: baseTreeSha,
+        tree: files.map((f) => ({
+          path: f.path,
+          mode: '100644',
+          type: 'blob',
+          content: f.content,
+        })),
+      }
 
-          const newTreeRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/trees`, {
-            method: 'POST',
-            headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
-            body: JSON.stringify(treePayload),
-            signal: AbortSignal.timeout(8_000),
-          })
+      const newTreeRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/trees`, {
+        method: 'POST',
+        headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(treePayload),
+        signal: AbortSignal.timeout(8_000),
+      })
+      if (!newTreeRes.ok) {
+        throw new Error(`Failed to build file tree (${newTreeRes.status})`)
+      }
+      const newTreeData = await newTreeRes.json()
+      const newTreeSha = newTreeData.sha
 
-          if (newTreeRes.ok) {
-            const newTreeData = await newTreeRes.json()
-            const newTreeSha = newTreeData.sha
+      // Create Git Commit
+      const newCommitRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/commits`, {
+        method: 'POST',
+        headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `${prTitle}\n\n${prBody}`,
+          tree: newTreeSha,
+          parents: [baseCommitSha],
+        }),
+        signal: AbortSignal.timeout(8_000),
+      })
+      if (!newCommitRes.ok) {
+        throw new Error(`Failed to construct commit (${newCommitRes.status})`)
+      }
+      const newCommitData = await newCommitRes.json()
+      const newCommitSha = newCommitData.sha
 
-            // Create Git Commit
-            const newCommitRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/commits`, {
-              method: 'POST',
-              headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                message: `${prTitle}\n\n${prBody}`,
-                tree: newTreeSha,
-                parents: [baseCommitSha],
-              }),
-              signal: AbortSignal.timeout(8_000),
-            })
+      // Create new branch reference
+      const createRefRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/refs`, {
+        method: 'POST',
+        headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ref: `refs/heads/${safeBranch}`,
+          sha: newCommitSha,
+        }),
+        signal: AbortSignal.timeout(8_000),
+      })
+      if (!createRefRes.ok) {
+        const errJson = await createRefRes.json().catch(() => ({}))
+        if (errJson.message?.includes('already exists')) {
+          throw new Error(`Branch ref 'refs/heads/${safeBranch}' already exists. Please supply a different branch name.`)
+        }
+        throw new Error(`Failed to create branch reference (${createRefRes.status})`)
+      }
 
-            if (newCommitRes.ok) {
-              const newCommitData = await newCommitRes.json()
-              const newCommitSha = newCommitData.sha
+      // Open Pull Request on original owner/repository
+      const headRef = isCrossFork ? `${apiUserLogin}:${safeBranch}` : safeBranch
+      const prRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/pulls`, {
+        method: 'POST',
+        headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: prTitle,
+          head: headRef,
+          base: targetBaseBranch,
+          body: prBody,
+        }),
+        signal: AbortSignal.timeout(8_000),
+      })
 
-              // Create new branch reference
-              const createRefRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/refs`, {
-                method: 'POST',
-                headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  ref: `refs/heads/${safeBranch}`,
-                  sha: newCommitSha,
-                }),
-                signal: AbortSignal.timeout(8_000),
-              })
-
-              if (createRefRes.ok) {
-                // Open Pull Request on original owner/repository
-                const headRef = isCrossFork ? `${apiUserLogin}:${safeBranch}` : safeBranch
-                const prRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/pulls`, {
-                  method: 'POST',
-                  headers: { ...githubHeaders(cleanToken), 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    title: prTitle,
-                    head: headRef,
-                    base: targetBaseBranch,
-                    body: prBody,
-                  }),
-                  signal: AbortSignal.timeout(8_000),
-                })
-
-                if (prRes.ok) {
-                  const prResult = await prRes.json()
-                  return {
-                    success: true,
-                    mode: 'live',
-                    pushed: true,
-                    prUrl: prResult.html_url,
-                    prNumber: prResult.number,
-                    branch: safeBranch,
-                    baseBranch: targetBaseBranch,
-                    title: prTitle,
-                    body: prBody,
-                    cliCommand,
-                    message: `Successfully created Pull Request #${prResult.number} on GitHub!`,
-                  }
-                } else {
-                  // Created branch on GitHub successfully, but PR opening needs confirmation
-                  const prError = await prRes.json().catch(() => ({}))
-                  const compareUrl = `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${headRef}`
-                  return {
-                    success: true,
-                    mode: 'live',
-                    pushed: true,
-                    prUrl: compareUrl,
-                    branch: safeBranch,
-                    baseBranch: targetBaseBranch,
-                    title: prTitle,
-                    body: prBody,
-                    cliCommand,
-                    message: `Branch '${safeBranch}' successfully created and pushed to GitHub! Click to review and open your Pull Request.`,
-                  }
-                }
-              }
-            }
-          }
+      if (prRes.ok) {
+        const prResult = await prRes.json()
+        return {
+          success: true,
+          mode: 'live',
+          pushed: true,
+          prUrl: prResult.html_url,
+          prNumber: prResult.number,
+          branch: safeBranch,
+          baseBranch: targetBaseBranch,
+          title: prTitle,
+          body: prBody,
+          cliCommand,
+          message: `Successfully created Pull Request #${prResult.number} on GitHub!`,
+        }
+      } else {
+        const compareUrl = `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${headRef}`
+        return {
+          success: true,
+          mode: 'live',
+          pushed: true,
+          prUrl: compareUrl,
+          branch: safeBranch,
+          baseBranch: targetBaseBranch,
+          title: prTitle,
+          body: prBody,
+          cliCommand,
+          message: `Branch '${safeBranch}' successfully created and pushed to GitHub! Click to review and open your Pull Request.`,
         }
       }
     } catch (error) {
-      console.warn('[PR Service] Live API attempt fallback:', error.message)
+      console.error('[PR Service] Live API attempt failed:', error.message)
+      throw error
     }
   }
 
   // Fallback when live API push token is restricted or unavailable:
-  // Provide a pre-populated GitHub PR compare link so the logged-in user can submit PR with 1 click
-  const isCrossFork = apiUserLogin && apiUserLogin.toLowerCase() !== owner.toLowerCase()
-  const headRef = isCrossFork ? `${apiUserLogin}:${safeBranch}` : safeBranch
-  const compareUrl = `https://github.com/${owner}/${repository}/compare/${defaultBranch}...${headRef}`
-
   return {
     success: true,
     mode: 'ready',
-    pushed: true,
-    prUrl: compareUrl,
+    pushed: false,
+    prUrl: null,
     branch: safeBranch,
     baseBranch: defaultBranch,
     title: prTitle,
     body: prBody,
     patch,
     cliCommand,
-    message: `Refactor branch '${safeBranch}' prepared! Click below to review and submit your Pull Request directly on GitHub with your logged-in account.`,
+    message: `Refactor branch '${safeBranch}' is prepared locally! Since you are not connected to GitHub, download the .patch file or apply it using the Git CLI below.`,
   }
 }

@@ -16,7 +16,7 @@ import {
   Key,
 } from 'lucide-react'
 import type { Analysis, PullRequestResult } from '../types'
-import { createAutomatedPullRequest, downloadGitPatch } from '../services/apiService'
+import { createAutomatedPullRequest, downloadGitPatch, getSessionToken, getGitHubPat } from '../services/apiService'
 import { GitHubAuthModal } from './GitHubAuthModal'
 
 interface AutomatedPrModalProps {
@@ -45,6 +45,8 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
   const [copiedCli, setCopiedCli] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
 
+  const hasToken = Boolean(getSessionToken() || getGitHubPat())
+
   // Close modal on Escape
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -56,6 +58,13 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    
+    // Auth gate check
+    if (!getSessionToken() && !getGitHubPat()) {
+      setShowAuthModal(true)
+      return
+    }
+
     setLoading(true)
     setError(null)
 
@@ -276,6 +285,16 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                 />
               </div>
 
+              {!hasToken && (
+                <div className="flex items-start gap-2.5 p-3.5 rounded-lg bg-[#092230] border border-[#164e63]/30 text-xs text-cyan-200 mb-4">
+                  <Key size={14} className="text-[#39f3c3] flex-shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-semibold block mb-0.5">Authentication Required</strong>
+                    Connecting your GitHub account allows CodeGenome to automatically fork the repository, commit the refactor, and open a Pull Request safely on your behalf.
+                  </div>
+                </div>
+              )}
+
               <div className="pr-form-footer">
                 <button
                   type="button"
@@ -294,6 +313,11 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                     <>
                       <Loader2 size={14} className="spin-icon" />
                       <span>Creating PR...</span>
+                    </>
+                  ) : !hasToken ? (
+                    <>
+                      <Key size={14} />
+                      <span>Connect GitHub &amp; Create PR</span>
                     </>
                   ) : (
                     <>
