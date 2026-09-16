@@ -117,6 +117,44 @@ Guidelines:
 
   // 2. Secondary: OpenAI provider fallback if configured
   if (isValidKey(process.env.OPENAI_API_KEY) && process.env.OPENAI_MODEL) {
+    try {
+      const client = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+        ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
+      })
+
+      const formattedHistory = history.map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+      }))
+
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        ...formattedHistory,
+        { role: 'user', content: question },
+      ]
+
+      const callPromise = client.chat.completions.create({
+        model: process.env.OPENAI_MODEL,
+        messages,
+      })
+
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 20_000))
+      const result = await Promise.race([callPromise, timeoutPromise])
+      const content = result.choices?.[0]?.message?.content?.trim()
+
+      if (content) {
+        return {
+          answer: content,
+          confidence: 0.98,
+          sourceFiles: sourceFiles.length ? sourceFiles : [target],
+          provider: 'OpenAI',
+        }
+      }
+    } catch (err) {
+      console.error('[QA Router] OpenAI/Z.ai query error:', err?.message)
+    }
+  }
 
   // 3. Smart Fallback generator if no API keys configured or call failed
   let fallbackText = `Based on repository analysis of **${repoName}**, the priority recommendation is to refactor \`${target}\`.`
