@@ -76,6 +76,10 @@ prRouter.post('/pr/create', async (req, res, next) => {
       }
     }
 
+    if (filesToCommit.length === 0) {
+      return res.status(400).json({ error: 'No code changes found in this analysis to push to GitHub.' })
+    }
+
     const rawPatch = refactorData.diff?.rawPatch || ''
 
     const result = await createPullRequest({

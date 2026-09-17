@@ -155,6 +155,10 @@ export async function createPullRequest({
       const newTreeData = await newTreeRes.json()
       const newTreeSha = newTreeData.sha
 
+      if (newTreeSha === baseTreeSha) {
+        throw new Error('The generated refactor is exactly identical to the current code. No changes to commit.')
+      }
+
       // Create Git Commit
       const newCommitRes = await fetch(`https://api.github.com/repos/${targetOwner}/${repository}/git/commits`, {
         method: 'POST',
@@ -190,6 +194,10 @@ export async function createPullRequest({
         throw new Error(`Failed to create branch reference (${createRefRes.status})`)
       }
 
+      // Allow 2.5 seconds for GitHub's internal database replicas to sync the new branch 
+      // before we attempt to create a PR or redirect the user, preventing "Branch not found" errors.
+      await new Promise(resolve => setTimeout(resolve, 2500))
+
       // Open Pull Request on original owner/repository
       const headRef = isCrossFork ? `${apiUserLogin}:${safeBranch}` : safeBranch
       const prRes = await fetch(`https://api.github.com/repos/${owner}/${repository}/pulls`, {
@@ -220,19 +228,32 @@ export async function createPullRequest({
           message: `Successfully created Pull Request #${prResult.number} on GitHub!`,
         }
       } else {
-        const compareUrl = `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${headRef}`
-        return {
-          success: true,
-          mode: 'live',
-          pushed: true,
-          prUrl: compareUrl,
-          branch: safeBranch,
-          baseBranch: targetBaseBranch,
-          title: prTitle,
-          body: prBody,
-          cliCommand,
-          message: `Branch '${safeBranch}' successfully created and pushed to GitHub! Click to review and open your Pull Request.`,
+        const errJson = await prRes.json().catch(() => ({}))
+        const errMsg = errJson.message || 'Unknown GitHub API error'
+        const errDetails = errJson.errors ? errJson.errors.map(e => e.message).join(', ') : ''
+        
+        if (errMsg.includes('No commits between') || errDetails.includes('No commits between')) {
+          throw new Error('There are no differences between the generated code and the original code in the repository. Nothing to pull request.')
         }
+        
+        // If it's a replication delay, GitHub usually says Validation Failed: head invalid
+        if (errDetails.includes('head') || errMsg.includes('Validation Failed')) {
+          const compareUrl = `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${headRef}`
+          return {
+            success: true,
+            mode: 'live',
+            pushed: true,
+            prUrl: compareUrl,
+            branch: safeBranch,
+            baseBranch: targetBaseBranch,
+            title: prTitle,
+            body: prBody,
+            cliCommand,
+            message: `Branch '${safeBranch}' successfully created and pushed to GitHub! Click to review and open your Pull Request.`,
+          }
+        }
+        
+        throw new Error(`Failed to create Pull Request: ${errMsg} ${errDetails}`)
       }
     } catch (error) {
       console.error('[PR Service] Live API attempt failed:', error.message)

@@ -74,6 +74,12 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
     setLoading(true)
     setError(null)
 
+    // Open blank window synchronously to prevent popup blocker, but don't inject any HTML loader
+    const prWindow = window.open('about:blank', '_blank')
+    if (prWindow) {
+      prWindow.document.title = "Redirecting to GitHub..."
+    }
+
     // Save PAT if entered in-form
     const cleanPat = patInput.trim()
     if (cleanPat) {
@@ -94,9 +100,16 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
       })
       setResult(res)
       if (res.prUrl) {
-        window.open(res.prUrl, '_blank', 'noopener,noreferrer')
+        if (prWindow) {
+          prWindow.location.href = res.prUrl
+        } else {
+          window.open(res.prUrl, '_blank', 'noopener,noreferrer')
+        }
+      } else if (prWindow) {
+        prWindow.close()
       }
     } catch (err: any) {
+      if (prWindow) prWindow.close()
       const errMsg = err?.message || 'Failed to generate Pull Request.'
       setError(errMsg)
       
@@ -312,6 +325,12 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                         setLoading(true);
                         setError(null);
 
+                        // Open blank window synchronously to prevent popup blocker
+                        const prWindow = window.open('about:blank', '_blank');
+                        if (prWindow) {
+                          prWindow.document.title = "Redirecting to GitHub...";
+                        }
+
                         const cleanPat = patInput.trim();
                         if (cleanPat) {
                           setGitHubPat(cleanPat);
@@ -330,9 +349,16 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                           });
                           setResult(res);
                           if (res.prUrl) {
-                            window.open(res.prUrl, '_blank', 'noopener,noreferrer');
+                            if (prWindow) {
+                              prWindow.location.href = res.prUrl;
+                            } else {
+                              window.open(res.prUrl, '_blank', 'noopener,noreferrer');
+                            }
+                          } else if (prWindow) {
+                            prWindow.close();
                           }
                         } catch (err: any) {
+                          if (prWindow) prWindow.close();
                           const errMsg = err?.message || 'Failed to create real Pull Request.'
                           setError(errMsg)
                           

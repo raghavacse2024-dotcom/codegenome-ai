@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { initializeApp, getApps } from 'firebase/app'
-import { getFirestore } from 'firebase/firestore'
+import { initializeFirestore } from 'firebase/firestore'
 
 let dbInstance = null
 
@@ -27,9 +27,9 @@ export function getServerFirestore() {
       storageBucket: rawConfig.storageBucket,
     })
 
-    dbInstance = rawConfig.firestoreDatabaseId
-      ? getFirestore(app, rawConfig.firestoreDatabaseId)
-      : getFirestore(app)
+    dbInstance = initializeFirestore(app, {
+      experimentalForceLongPolling: true
+    }, rawConfig.firestoreDatabaseId)
 
     return dbInstance
   } catch (error) {

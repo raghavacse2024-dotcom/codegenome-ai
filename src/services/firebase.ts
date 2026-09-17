@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app'
-import { getFirestore, doc, getDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
+import { initializeFirestore, doc, getDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth'
 import config from '../../firebase-applet-config.json'
 import type { Analysis } from '../types'
@@ -12,9 +12,9 @@ const app = getApps().length > 0 ? getApps()[0] : initializeApp({
   storageBucket: config.storageBucket,
 })
 
-export const db = config.firestoreDatabaseId
-  ? getFirestore(app, config.firestoreDatabaseId)
-  : getFirestore(app)
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true
+}, config.firestoreDatabaseId)
 
 export const auth = getAuth(app)
 export const googleProvider = new GoogleAuthProvider()
