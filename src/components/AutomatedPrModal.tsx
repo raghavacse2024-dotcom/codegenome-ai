@@ -74,6 +74,24 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
     setLoading(true)
     setError(null)
 
+    // Pre-open a blank window synchronously to bypass the browser's async popup blocker.
+    // Browsers allow window.open ONLY when called directly within a click/submit handler,
+    // so by doing this before the await, we keep it trusted.
+    const prWindow = window.open('about:blank', '_blank')
+    if (prWindow) {
+      prWindow.document.title = "Redirecting to GitHub..."
+      prWindow.document.body.innerHTML = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #0b1329; color: #ffffff; text-align: center; padding: 20px;">
+          <div style="border: 4px solid rgba(255,255,255,0.1); border-top: 4px solid #39f3c3; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+          <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 10px 0;">Redirecting to GitHub...</h2>
+          <p style="color: #94a3b8; font-size: 14px; margin: 0;">CodeGenome is preparing your pull request. You will be redirected shortly.</p>
+          <style>
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+          </style>
+        </div>
+      `
+    }
+
     // Save PAT if entered in-form
     const cleanPat = patInput.trim()
     if (cleanPat) {
@@ -94,9 +112,16 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
       })
       setResult(res)
       if (res.prUrl) {
-        window.open(res.prUrl, '_blank', 'noopener,noreferrer')
+        if (prWindow) {
+          prWindow.location.href = res.prUrl
+        } else {
+          window.open(res.prUrl, '_blank', 'noopener,noreferrer')
+        }
+      } else {
+        if (prWindow) prWindow.close()
       }
     } catch (err: any) {
+      if (prWindow) prWindow.close()
       const errMsg = err?.message || 'Failed to generate Pull Request.'
       setError(errMsg)
       
@@ -311,6 +336,25 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                         }
                         setLoading(true);
                         setError(null);
+                        
+                        // Pre-open a blank window synchronously to bypass the browser's async popup blocker.
+                        // Browsers allow window.open ONLY when called directly within a click handler,
+                        // so by doing this before the await, we keep it trusted.
+                        const prWindow = window.open('about:blank', '_blank');
+                        if (prWindow) {
+                          prWindow.document.title = "Redirecting to GitHub...";
+                          prWindow.document.body.innerHTML = `
+                            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #0b1329; color: #ffffff; text-align: center; padding: 20px;">
+                              <div style="border: 4px solid rgba(255,255,255,0.1); border-top: 4px solid #39f3c3; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+                              <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 10px 0;">Redirecting to GitHub...</h2>
+                              <p style="color: #94a3b8; font-size: 14px; margin: 0;">CodeGenome is preparing your pull request. You will be redirected shortly.</p>
+                              <style>
+                                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                              </style>
+                            </div>
+                          `;
+                        }
+
                         const cleanPat = patInput.trim();
                         if (cleanPat) {
                           setGitHubPat(cleanPat);
@@ -329,9 +373,17 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                           });
                           setResult(res);
                           if (res.prUrl) {
-                            window.open(res.prUrl, '_blank', 'noopener,noreferrer');
+                            if (prWindow) {
+                              prWindow.location.href = res.prUrl;
+                            } else {
+                              // Fallback if browser blocked the pre-opened window entirely
+                              window.open(res.prUrl, '_blank', 'noopener,noreferrer');
+                            }
+                          } else {
+                            if (prWindow) prWindow.close();
                           }
                         } catch (err: any) {
+                          if (prWindow) prWindow.close();
                           setError(err?.message || 'Failed to create real Pull Request.');
                         } finally {
                           setLoading(false);
