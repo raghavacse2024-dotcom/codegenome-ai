@@ -93,6 +93,9 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
         baseBranch,
       })
       setResult(res)
+      if (res.prUrl) {
+        window.open(res.prUrl, '_blank', 'noopener,noreferrer')
+      }
     } catch (err: any) {
       const errMsg = err?.message || 'Failed to generate Pull Request.'
       setError(errMsg)
@@ -231,6 +234,114 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                   <span>Download .patch</span>
                 </button>
               </div>
+
+              {/* Convert to Live PR option */}
+              {!result.prUrl && (
+                <div 
+                  className="p-5 rounded-xl text-sm flex flex-col gap-4 mb-5"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(8, 27, 38, 0.95), rgba(12, 40, 56, 0.95))',
+                    border: '1px solid rgba(57, 243, 195, 0.2)',
+                  }}
+                >
+                  <div className="flex items-start gap-3">
+                    <div 
+                      className="p-2 rounded-lg mt-0.5 flex-shrink-0"
+                      style={{
+                        background: 'rgba(57, 243, 195, 0.1)',
+                        color: '#39f3c3',
+                      }}
+                    >
+                      <GitPullRequest size={18} />
+                    </div>
+                    <div>
+                      <h5 className="font-semibold text-white text-sm mb-1">Create Real Pull Request on GitHub</h5>
+                      <p className="text-slate-300 text-xs leading-relaxed">
+                        CodeGenome can automatically fork this repository to your profile, push the refactor branch, and <strong>redirect you directly to GitHub</strong> to review and open your Pull Request in 1 click!
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2.5">
+                    <div className="input-with-icon" style={{ position: 'relative' }}>
+                      <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
+                      <input
+                        type="password"
+                        placeholder="Paste your GitHub Personal Access Token (ghp_...)"
+                        value={patInput}
+                        onChange={(e) => setPatInput(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px 10px 32px',
+                          background: 'rgba(0,0,0,0.5)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '8px',
+                          color: '#ffffff',
+                          fontSize: '13px',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    
+                    {error && (
+                      <div className="text-xs text-red-400 mt-1 flex items-center gap-1.5">
+                        <AlertCircle size={13} />
+                        <span>{error}</span>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      className="pr-btn pr-btn--primary w-full mt-1.5 justify-center"
+                      onClick={async () => {
+                        if (!patInput.trim()) {
+                          setError('Please paste a GitHub Personal Access Token first.');
+                          return;
+                        }
+                        setLoading(true);
+                        setError(null);
+                        const cleanPat = patInput.trim();
+                        setGitHubPat(cleanPat);
+                        const sess = getSessionToken();
+                        if (sess) {
+                          await registerSession(sess, undefined, cleanPat).catch(() => null);
+                        }
+                        try {
+                          const res = await createAutomatedPullRequest({
+                            analysisId: analysis.analysisId,
+                            title: result.title || title,
+                            branch: result.branch || branch,
+                            body: result.body || body,
+                            baseBranch: result.baseBranch || baseBranch,
+                          });
+                          setResult(res);
+                          if (res.prUrl) {
+                            window.open(res.prUrl, '_blank', 'noopener,noreferrer');
+                          }
+                        } catch (err: any) {
+                          setError(err?.message || 'Failed to create real Pull Request.');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <>
+                          <Loader2 size={14} className="spin-icon animate-spin" />
+                          <span>Pushing Branch & Creating PR...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ExternalLink size={14} />
+                          <span>Push to GitHub & Open Pull Request</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* CLI Command if applicable */}
               {result.cliCommand && (
