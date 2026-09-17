@@ -42,6 +42,12 @@ prRouter.post('/pr/create', async (req, res, next) => {
       if (raw.startsWith('cg_')) {
         token = getStoredToken(raw)
         user = getStoredUser(raw)
+        
+        // If they provided a CodeGenome session but it's not in the in-memory store (e.g. server restarted)
+        // and no custom PAT was provided, return 401 to force a re-login on the frontend.
+        if (!token && !customPat && raw.startsWith('cg_github_')) {
+          return res.status(401).json({ error: 'Your session has expired. Please log in again.' })
+        }
       } else {
         token = raw
       }

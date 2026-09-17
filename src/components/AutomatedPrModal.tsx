@@ -94,7 +94,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
       })
       setResult(res)
       if (res.prUrl) {
-        window.location.href = res.prUrl
+        window.open(res.prUrl, '_blank', 'noopener,noreferrer')
       }
     } catch (err: any) {
       const errMsg = err?.message || 'Failed to generate Pull Request.'
@@ -330,10 +330,25 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                           });
                           setResult(res);
                           if (res.prUrl) {
-                            window.location.href = res.prUrl;
+                            window.open(res.prUrl, '_blank', 'noopener,noreferrer');
                           }
                         } catch (err: any) {
-                          setError(err?.message || 'Failed to create real Pull Request.');
+                          const errMsg = err?.message || 'Failed to create real Pull Request.'
+                          setError(errMsg)
+                          
+                          if (
+                            errMsg.toLowerCase().includes('session has expired') || 
+                            errMsg.toLowerCase().includes('reconnect') ||
+                            errMsg.toLowerCase().includes('401')
+                          ) {
+                            try {
+                              localStorage.removeItem('codegenome_github_session')
+                              localStorage.removeItem('codegenome_github_pat')
+                              localStorage.removeItem('codegenome_github_user')
+                            } catch {}
+                            
+                            setTimeout(() => setShowAuthModal(true), 500)
+                          }
                         } finally {
                           setLoading(false);
                         }
