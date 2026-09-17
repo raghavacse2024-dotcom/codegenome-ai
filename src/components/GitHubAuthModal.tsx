@@ -230,6 +230,34 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
           Sign in securely using your Google account connected to your GitHub profile to analyze public and <strong>private repositories</strong> in real time.
         </p>
 
+        {/* Visual explanation of direct GitHub workflow */}
+        <div className="mt-4 mb-2 p-4 rounded-xl text-left flex flex-col gap-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <h4 className="text-xs uppercase tracking-wider font-semibold" style={{ color: '#39f3c3' }}>How GitHub Auth Works</h4>
+          <div className="flex flex-col gap-3 text-xs text-slate-300">
+            <div className="flex gap-2.5 items-start">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#39f3c3]/10 text-[#39f3c3] flex items-center justify-center font-bold text-[10px]">1</span>
+              <div>
+                <strong className="text-white font-medium block mb-0.5">Secure Authorization</strong>
+                When you click "Sign in with GitHub", GitHub opens a secure authorization window asking if you want to authorize CodeGenome.
+              </div>
+            </div>
+            <div className="flex gap-2.5 items-start">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#39f3c3]/10 text-[#39f3c3] flex items-center justify-center font-bold text-[10px]">2</span>
+              <div>
+                <strong className="text-white font-medium block mb-0.5">Automated Token Handling</strong>
+                Once you click authorize, GitHub automatically sends a temporary, secure write-access token to the app behind the scenes.
+              </div>
+            </div>
+            <div className="flex gap-2.5 items-start">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#39f3c3]/10 text-[#39f3c3] flex items-center justify-center font-bold text-[10px]">3</span>
+              <div>
+                <strong className="text-white font-medium block mb-0.5">One-Click Pull Requests</strong>
+                With your GitHub account connected, CodeGenome will automatically fork the repository, commit the files, and instantly redirect you to GitHub's Compare page to review and submit with one click!
+              </div>
+            </div>
+          </div>
+        </div>
+
         {error && (
           <div className="auth-error-banner">
             <AlertCircle className="w-4 h-4 shrink-0 text-[#ff6b6b]" />
