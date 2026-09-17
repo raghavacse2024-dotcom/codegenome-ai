@@ -425,11 +425,15 @@ export function createAutomatedPullRequest(params: {
   baseBranch?: string
 }): Promise<import('../types').PullRequestResult> {
   const token = getSessionToken()
+  const githubPat = getGitHubPat()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
+  }
+  if (githubPat) {
+    headers['X-GitHub-Token'] = githubPat
   }
 
   return request<import('../types').PullRequestResult>('/api/pr/create', {

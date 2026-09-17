@@ -257,32 +257,42 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                     <div>
                       <h5 className="font-semibold text-white text-sm mb-1">Create Real Pull Request on GitHub</h5>
                       <p className="text-slate-300 text-xs leading-relaxed">
-                        CodeGenome can automatically fork this repository to your profile, push the refactor branch, and <strong>redirect you directly to GitHub</strong> to review and open your Pull Request in 1 click!
+                        {hasWriteToken ? (
+                          <>
+                            You are authenticated with your GitHub account! CodeGenome can automatically fork this repository, commit your files, and <strong>redirect you directly to GitHub</strong> to review and open your Pull Request.
+                          </>
+                        ) : (
+                          <>
+                            CodeGenome can automatically fork this repository to your profile, push the refactor branch, and <strong>redirect you directly to GitHub</strong> to review and open your Pull Request in 1 click!
+                          </>
+                        )}
                       </p>
                     </div>
                   </div>
 
                   <div className="flex flex-col gap-2.5">
-                    <div className="input-with-icon" style={{ position: 'relative' }}>
-                      <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
-                      <input
-                        type="password"
-                        placeholder="Paste your GitHub Personal Access Token (ghp_...)"
-                        value={patInput}
-                        onChange={(e) => setPatInput(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '10px 12px 10px 32px',
-                          background: 'rgba(0,0,0,0.5)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '8px',
-                          color: '#ffffff',
-                          fontSize: '13px',
-                          outline: 'none',
-                          boxSizing: 'border-box'
-                        }}
-                      />
-                    </div>
+                    {!hasWriteToken && (
+                      <div className="input-with-icon" style={{ position: 'relative' }}>
+                        <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
+                        <input
+                          type="password"
+                          placeholder="Paste your GitHub Personal Access Token (ghp_...)"
+                          value={patInput}
+                          onChange={(e) => setPatInput(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px 10px 32px',
+                            background: 'rgba(0,0,0,0.5)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '8px',
+                            color: '#ffffff',
+                            fontSize: '13px',
+                            outline: 'none',
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                      </div>
+                    )}
                     
                     {error && (
                       <div className="text-xs text-red-400 mt-1 flex items-center gap-1.5">
@@ -295,17 +305,19 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                       type="button"
                       className="pr-btn pr-btn--primary w-full mt-1.5 justify-center"
                       onClick={async () => {
-                        if (!patInput.trim()) {
+                        if (!hasWriteToken && !patInput.trim()) {
                           setError('Please paste a GitHub Personal Access Token first.');
                           return;
                         }
                         setLoading(true);
                         setError(null);
                         const cleanPat = patInput.trim();
-                        setGitHubPat(cleanPat);
-                        const sess = getSessionToken();
-                        if (sess) {
-                          await registerSession(sess, undefined, cleanPat).catch(() => null);
+                        if (cleanPat) {
+                          setGitHubPat(cleanPat);
+                          const sess = getSessionToken();
+                          if (sess) {
+                            await registerSession(sess, undefined, cleanPat).catch(() => null);
+                          }
                         }
                         try {
                           const res = await createAutomatedPullRequest({
