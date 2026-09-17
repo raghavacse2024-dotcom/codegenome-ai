@@ -63,9 +63,15 @@ export default function App() {
       .then((res) => {
         if (res.authenticated && res.user) {
           setUser(res.user)
+        } else {
+          // Stale session detected, clear local state
+          setUser(null)
+          logoutUser().catch(() => {})
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        // If query fails, keep current state to remain resilient
+      })
   }, [])
 
   useEffect(() => {

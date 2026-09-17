@@ -30,7 +30,7 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
       id: 'init-1',
       role: 'assistant',
       content:
-        'Hello! I am **CodeGenome AI**, your senior repository architecture and refactoring assistant. Ask me anything about this repository’s architecture, technical debt hotspots, cost valuations, or step-by-step refactoring strategy.',
+        'Hello! I am CodeGenome AI, your senior repository architecture and refactoring assistant. Ask me anything about this repository’s architecture, technical debt hotspots, cost valuations, or step-by-step refactoring strategy.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       confidence: 1.0,
       provider: 'CodeGenome AI',
@@ -39,10 +39,15 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
-  const chatEndRef = useRef<HTMLDivElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: 'smooth',
+      })
+    }
   }, [messages, loading])
 
   async function handleSend(promptText?: string) {
@@ -252,6 +257,7 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
 
       {/* Chat Messages Stream */}
       <div
+        ref={chatContainerRef}
         className="qa-chat-feed sleek-scrollbar"
         style={{
           flex: 1,
@@ -348,7 +354,12 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {msg.content}
+                  {msg.content
+                    ? msg.content
+                        .replace(/\*\*/g, '')
+                        .replace(/^\s*\*\s+/gm, '• ')
+                        .replace(/\s*\*\s+/g, ' ')
+                    : ''}
                 </p>
 
                 {msg.role === 'assistant' && (
@@ -439,7 +450,6 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
           </div>
         )}
 
-        <div ref={chatEndRef} />
       </div>
 
       {/* Input Bar */}

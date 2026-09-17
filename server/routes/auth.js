@@ -142,13 +142,13 @@ authRouter.get('/auth/user', async (req, res) => {
     }
   }
 
-  if (!token) {
-    return res.json({ authenticated: false, user: null })
-  }
-
   const stored = sessionId ? tokenStore.get(sessionId) : null
   if (stored?.user) {
     return res.json({ authenticated: true, user: stored.user })
+  }
+
+  if (!token) {
+    return res.json({ authenticated: false, user: null })
   }
 
   try {

@@ -57,7 +57,9 @@ Repository Intelligence Knowledge Base:
 Guidelines:
 1. Act as a natural, highly intelligent conversational assistant (like Gemini or ChatGPT).
 2. Answer any question directly—whether about repository architecture, technical debt, how to implement a fix, general coding concepts, or step-by-step guidance.
-3. Use clean Markdown formatting with bold text, bullet points, and code blocks (\`\`\`ts) whenever sharing code examples.
+3. FORMATTING RESTRICTION: DO NOT USE ASTERISKS / STARS (* or **) anywhere in your output. No italicization stars, no bolding stars, and no list-item stars.
+   - For emphasis or labels, use plain capital letters, quotes, or colons/semicolons (e.g. "HOTSPOT ARCHITECTURE: details" or simply "Hotspot Architecture: details").
+   - For bullet lists, use simple dashes (-) or numbers (1., 2.), never stars (*).
 4. Keep explanations clear, engaging, and professional.`
 
   // 1. Primary: Try Gemini 3.8 Flash model via @google/genai SDK
@@ -79,7 +81,7 @@ Guidelines:
         role: 'model',
         parts: [
           {
-            text: `Understood! I am CodeGenome AI Repository Chatbot. I am fully grounded in the architectural blueprint, hotspot metrics, technical debt score, and refactoring plan for **${repoName}**. How can I help you?`,
+            text: `Understood! I am CodeGenome AI Repository Chatbot. I am fully grounded in the architectural blueprint, hotspot metrics, technical debt score, and refactoring plan for ${repoName}. How can I help you?`,
           },
         ],
       })
@@ -157,16 +159,16 @@ Guidelines:
   }
 
   // 3. Smart Fallback generator if no API keys configured or call failed
-  let fallbackText = `Based on repository analysis of **${repoName}**, the priority recommendation is to refactor \`${target}\`.`
+  let fallbackText = `Based on repository analysis of ${repoName}, the priority recommendation is to refactor \`${target}\`.`
 
   if (/^(hi|hello|hey|greetings|who are you|what can you do|help)/i.test(question.trim())) {
-    fallbackText = `Hello! I am **CodeGenome AI**, your senior repository architecture and refactoring assistant.\n\nI have analyzed **${repoName}**:\n- **Primary Refactor Target**: \`${target}\`\n- **Tech Stack**: ${arch.framework || 'TypeScript / Node.js'}\n\nAsk me anything! For example:\n- *"How do I refactor ${target}?"*\n- *"What is the architectural structure?"*\n- *"Explain the technical debt hotspots."*`
+    fallbackText = `Hello! I am CodeGenome AI, your senior repository architecture and refactoring assistant.\n\nI have analyzed ${repoName}:\n- Primary Refactor Target: \`${target}\`\n- Tech Stack: ${arch.framework || 'TypeScript / Node.js'}\n\nAsk me anything! For example:\n- "How do I refactor ${target}?"\n- "What is the architectural structure?"\n- "Explain the technical debt hotspots."`
   } else if (q.includes('architecture') || q.includes('structure') || q.includes('framework')) {
     const layersStr = arch.layers?.join(' -> ') || 'Presentation -> Services -> Integrations'
-    fallbackText = `Repository **${repoName}** is built with **${arch.framework || 'TypeScript / Node.js'}**.\n\n### Architectural Layers:\n\`${layersStr}\`\n\n- **Entry Points**: ${arch.structure?.entryPoints?.join(', ') || 'src/main.ts'}\n- **Violations**: ${arch.violations?.length ? arch.violations[0] : 'None detected. Good separation of concerns.'}`
+    fallbackText = `Repository ${repoName} is built with ${arch.framework || 'TypeScript / Node.js'}.\n\n### Architectural Layers:\n\`${layersStr}\`\n\n- Entry Points: ${arch.structure?.entryPoints?.join(', ') || 'src/main.ts'}\n- Violations: ${arch.violations?.length ? arch.violations[0] : 'None detected. Good separation of concerns.'}`
   } else if (q.includes('debt') || q.includes('hotspot') || q.includes('complex')) {
     const topHotspot = hotspots[0]
-    fallbackText = `### Technical Debt Overview for ${repoName}:\n- **Debt Index**: ${analysis.results?.debt?.data?.totalDebtScore || 65}/100\n- **Primary Hotspot**: \`${topHotspot?.path || target}\` (Score: ${topHotspot?.score || 85}/100)\n\n*Recommendation*: Decouple heavy switch-statements and extract helper methods.`
+    fallbackText = `### Technical Debt Overview for ${repoName}:\n- Debt Index: ${analysis.results?.debt?.data?.totalDebtScore || 65}/100\n- Primary Hotspot: \`${topHotspot?.path || target}\` (Score: ${topHotspot?.score || 85}/100)\n\nRecommendation: Decouple heavy switch-statements and extract helper methods.`
   } else if (q.includes('refactor') || q.includes('step') || q.includes('plan') || q.includes('how')) {
     const stepList = steps.length ? steps.map((s, idx) => `${idx + 1}. ${s}`).join('\n') : '1. Extract monolithic handlers.\n2. Add unit test coverage.\n3. Verify integration.'
     fallbackText = `### Actionable Refactor Strategy for ${repoName}:\n\nTarget Module: \`${target}\`\n\n${stepList}`

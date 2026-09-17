@@ -16,7 +16,7 @@ import {
   Key,
 } from 'lucide-react'
 import type { Analysis, PullRequestResult } from '../types'
-import { createAutomatedPullRequest, downloadGitPatch, getSessionToken, getGitHubPat } from '../services/apiService'
+import { createAutomatedPullRequest, downloadGitPatch, getSessionToken, getGitHubPat, setGitHubPat, registerSession } from '../services/apiService'
 import { GitHubAuthModal } from './GitHubAuthModal'
 
 interface AutomatedPrModalProps {
@@ -44,8 +44,14 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
   const [result, setResult] = useState<PullRequestResult | null>(null)
   const [copiedCli, setCopiedCli] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
+  const [patInput, setPatInput] = useState(getGitHubPat() || '')
 
-  const hasToken = Boolean(getSessionToken() || getGitHubPat())
+  const pat = getGitHubPat()
+  const isGoogleOrFallbackSession = Boolean(
+    getSessionToken() && 
+    (getSessionToken()?.startsWith('cg_google_') || getSessionToken()?.includes('google') || getSessionToken()?.includes('fallback'))
+  )
+  const hasWriteToken = Boolean(pat || (getSessionToken() && !isGoogleOrFallbackSession))
 
   // Close modal on Escape
   useEffect(() => {
@@ -60,13 +66,23 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
     e.preventDefault()
     
     // Auth gate check
-    if (!getSessionToken() && !getGitHubPat()) {
+    if (!getSessionToken() && !getGitHubPat() && !patInput.trim()) {
       setShowAuthModal(true)
       return
     }
 
     setLoading(true)
     setError(null)
+
+    // Save PAT if entered in-form
+    const cleanPat = patInput.trim()
+    if (cleanPat) {
+      setGitHubPat(cleanPat)
+      const sess = getSessionToken()
+      if (sess) {
+        await registerSession(sess, undefined, cleanPat).catch(() => null)
+      }
+    }
 
     try {
       const res = await createAutomatedPullRequest({
@@ -78,7 +94,26 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
       })
       setResult(res)
     } catch (err: any) {
-      setError(err?.message || 'Failed to generate Pull Request.')
+      const errMsg = err?.message || 'Failed to generate Pull Request.'
+      setError(errMsg)
+      
+      if (
+        errMsg.toLowerCase().includes('session has expired') || 
+        errMsg.toLowerCase().includes('reconnect') ||
+        errMsg.toLowerCase().includes('401')
+      ) {
+        // Clear cached storage keys
+        try {
+          localStorage.removeItem('codegenome_github_session')
+          localStorage.removeItem('codegenome_github_pat')
+          localStorage.removeItem('codegenome_github_user')
+        } catch {}
+        
+        // Show auth modal to re-establish connection
+        setTimeout(() => {
+          setShowAuthModal(true)
+        }, 500)
+      }
     } finally {
       setLoading(false)
     }
@@ -285,12 +320,41 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                 />
               </div>
 
-              {!hasToken && (
-                <div className="flex items-start gap-2.5 p-3.5 rounded-lg bg-[#092230] border border-[#164e63]/30 text-xs text-cyan-200 mb-4">
-                  <Key size={14} className="text-[#39f3c3] flex-shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="font-semibold block mb-0.5">Authentication Required</strong>
-                    Connecting your GitHub account allows CodeGenome to automatically fork the repository, commit the refactor, and open a Pull Request safely on your behalf.
+              {!hasWriteToken && (
+                <div className="flex flex-col gap-3.5 p-4 rounded-xl bg-[#081b26] border border-[#164e63]/30 mb-5 text-sm">
+                  <div className="flex items-start gap-2.5 text-xs text-cyan-200">
+                    <AlertCircle size={16} className="text-[#39f3c3] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="font-semibold block mb-0.5 text-white">Live GitHub Push Permission Integration</strong>
+                      You are signed in conceptually, but there is no connected GitHub Write Token. 
+                      To automatically fork this repository, commit your changes, and submit a Pull Request on your behalf, please paste a <strong>GitHub Personal Access Token (PAT)</strong> with <code className="bg-[#0b172a] px-1 py-0.5 rounded text-[#39f3c3]">repo</code> permissions below:
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col gap-2">
+                    <div className="input-with-icon" style={{ position: 'relative' }}>
+                      <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
+                      <input
+                        type="password"
+                        placeholder="Paste your GitHub PAT (ghp_... or github_pat_...)"
+                        value={patInput}
+                        onChange={(e) => setPatInput(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px 10px 32px',
+                          background: 'rgba(0,0,0,0.5)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '8px',
+                          color: '#ffffff',
+                          fontSize: '13px',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-normal" style={{ margin: 0 }}>
+                      We securely proxy your PAT directly to GitHub to perform the git commands. It is never permanently stored on our servers. Alternatively, leave it blank to generate an offline Git patch/CLI commands!
+                    </p>
                   </div>
                 </div>
               )}
@@ -306,15 +370,20 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                 </button>
                 <button
                   type="submit"
-                  className="pr-btn pr-btn--primary"
+                  className={`pr-btn ${(!hasWriteToken && !patInput.trim()) ? 'pr-btn--secondary' : 'pr-btn--primary'}`}
                   disabled={loading}
                 >
                   {loading ? (
                     <>
                       <Loader2 size={14} className="spin-icon" />
-                      <span>Creating PR...</span>
+                      <span>{(!hasWriteToken && !patInput.trim()) ? 'Generating Patch...' : 'Creating PR...'}</span>
                     </>
-                  ) : !hasToken ? (
+                  ) : (!hasWriteToken && !patInput.trim()) ? (
+                    <>
+                      <Download size={14} />
+                      <span>Generate Offline Patch</span>
+                    </>
+                  ) : (!getSessionToken() && !patInput.trim()) ? (
                     <>
                       <Key size={14} />
                       <span>Connect GitHub &amp; Create PR</span>
