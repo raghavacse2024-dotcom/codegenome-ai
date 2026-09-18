@@ -120,6 +120,7 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
             const payload = {
               type: 'OAUTH_AUTH_SUCCESS',
               sessionId: ${JSON.stringify(sessionId)},
+              token: ${JSON.stringify(accessToken)},
               user: ${JSON.stringify(userData)}
             };
             if (window.opener) {

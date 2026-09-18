@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Analysis, AgentEvent } from '../types'
 import { analyzeRepositoryStream } from '../services/apiService'
 
@@ -6,17 +6,44 @@ import { analyzeRepositoryStream } from '../services/apiService'
  * Manages the repository analysis lifecycle for the dashboard with real-time SSE streaming.
  */
 export function useAnalysis() {
-  const [results, setResults] = useState<Analysis | null>(null)
+  const [results, setResults] = useState<Analysis | null>(() => {
+    try {
+      const cached = sessionStorage.getItem('codegenome_active_analysis')
+      return cached ? JSON.parse(cached) : null
+    } catch {
+      return null
+    }
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [streamEvents, setStreamEvents] = useState<AgentEvent[]>([])
+  const [streamEvents, setStreamEvents] = useState<AgentEvent[]>(() => {
+    try {
+      const cached = sessionStorage.getItem('codegenome_active_analysis')
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        return parsed.events || []
+      }
+    } catch {}
+    return []
+  })
   const [streamStatus, setStreamStatus] = useState<string>('')
+
+  useEffect(() => {
+    try {
+      if (results) {
+        sessionStorage.setItem('codegenome_active_analysis', JSON.stringify(results))
+      }
+    } catch {}
+  }, [results])
 
   async function run(githubUrl: string) {
     setLoading(true)
     setError('')
     setResults(null)
     setStreamEvents([])
+    try {
+      sessionStorage.removeItem('codegenome_active_analysis')
+    } catch {}
     setStreamStatus('Initializing SSE streaming pipeline...')
     try {
       const analysis = await analyzeRepositoryStream(githubUrl, {
@@ -54,6 +81,9 @@ export function useAnalysis() {
     setResults(analysis)
     setStreamEvents(analysis.events || [])
     setError('')
+    try {
+      sessionStorage.setItem('codegenome_active_analysis', JSON.stringify(analysis))
+    } catch {}
   }
 
   return { 

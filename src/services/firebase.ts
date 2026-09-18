@@ -1,6 +1,6 @@
 import { initializeApp, getApps } from 'firebase/app'
 import { getFirestore, doc, getDocFromServer, collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth'
+import { getAuth, GoogleAuthProvider, GithubAuthProvider, signInWithPopup, signOut } from 'firebase/auth'
 import config from '../../firebase-applet-config.json'
 import type { Analysis } from '../types'
 
@@ -9,7 +9,11 @@ const app = getApps().length > 0 ? getApps()[0] : initializeApp(config)
 export const db = getFirestore(app, config.firestoreDatabaseId)
 export const auth = getAuth(app)
 export const googleProvider = new GoogleAuthProvider()
-export { signInWithPopup, signOut }
+export const githubProvider = new GithubAuthProvider()
+githubProvider.addScope('repo')
+githubProvider.addScope('read:user')
+githubProvider.addScope('user:email')
+export { GithubAuthProvider, signInWithPopup, signOut }
 
 export enum OperationType {
   CREATE = 'create',

@@ -414,8 +414,45 @@ export function askQuestion(
  * Retrieves past repository scan history stored in persistent database.
  */
 export function getAnalysisHistory(): Promise<{ analyses: Analysis[] }> {
+  const cached = localStorage.getItem('codegenome_github_user')
+  let username: string | undefined
+  try {
+    if (cached) {
+      username = JSON.parse(cached)?.login
+    }
+  } catch {}
+
+  const headers: Record<string, string> = {}
+  if (username) {
+    headers['X-GitHub-User'] = username
+  }
+
   return request<{ analyses: Analysis[] }>('/api/history', {
     method: 'GET',
+    headers,
+  })
+}
+
+/**
+ * Clears all persistent repository scan history for the authenticated user from Firestore.
+ */
+export function clearAnalysisHistory(): Promise<{ success: boolean }> {
+  const cached = localStorage.getItem('codegenome_github_user')
+  let username: string | undefined
+  try {
+    if (cached) {
+      username = JSON.parse(cached)?.login
+    }
+  } catch {}
+
+  const headers: Record<string, string> = {}
+  if (username) {
+    headers['X-GitHub-User'] = username
+  }
+
+  return request<{ success: boolean }>('/api/history', {
+    method: 'DELETE',
+    headers,
   })
 }
 

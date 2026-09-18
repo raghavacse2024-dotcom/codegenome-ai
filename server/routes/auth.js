@@ -105,8 +105,7 @@ authRouter.get('/auth/github/url', (req, res) => {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: 'repo read:user user:email',
-    prompt: 'consent',
+    scope: 'repo,read:user,user:email',
     state,
   })
 

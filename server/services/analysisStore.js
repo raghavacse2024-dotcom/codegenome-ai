@@ -156,3 +156,41 @@ export async function getRecentAnalyses(userId = null, maxCount = 12) {
     .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0))
     .slice(0, maxCount)
 }
+
+/**
+ * Clears all persisted analysis records for a specific user from Firestore and in-memory cache.
+ * @param {string} userId Authenticated user identifier.
+ * @returns {Promise<boolean>}
+ */
+export async function clearUserAnalyses(userId) {
+  if (!userId) return false
+
+  // 1. Remove from in-memory cache
+  for (const [id, item] of analyses.entries()) {
+    if (item.userId === userId) {
+      analyses.delete(id)
+    }
+  }
+
+  // 2. Delete documents from Firestore
+  try {
+    const db = getServerFirestore()
+    if (db) {
+      const colRef = collection(db, 'analyses')
+      const q = query(colRef, where('userId', '==', userId))
+      const snapshot = await getDocs(q)
+      const { deleteDoc } = await import('firebase/firestore')
+      const deletes = []
+      snapshot.forEach((d) => {
+        deletes.push(deleteDoc(d.ref))
+      })
+      await Promise.all(deletes)
+      console.log(`[Firestore] Successfully cleared ${snapshot.size} analyses for user '${userId}'`)
+    }
+  } catch (err) {
+    console.warn(`[Firestore] Failed to clear analyses for user '${userId}':`, err.message)
+  }
+
+  return true
+}
+

@@ -127,10 +127,10 @@ export function HeaderNav({ currentView, onSelectView, user, onOpenAuth, onLogou
               type="button" 
               className="header-github-btn"
               onClick={onOpenAuth}
-              style={{ background: 'linear-gradient(135deg, rgba(66, 133, 244, 0.2), rgba(125, 243, 195, 0.15))', border: '1px solid rgba(66, 133, 244, 0.4)' }}
+              style={{ background: 'linear-gradient(135deg, rgba(36, 41, 46, 0.9), rgba(13, 148, 136, 0.4))', border: '1px solid rgba(57, 243, 195, 0.4)' }}
             >
               <GitBranch className="w-3.5 h-3.5 text-neon" />
-              <span>Sign In with Google</span>
+              <span>Sign In with GitHub</span>
             </button>
           )}
         </div>

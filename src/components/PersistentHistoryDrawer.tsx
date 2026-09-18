@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Database, Clock, ArrowUpRight, ShieldCheck, RefreshCw, CheckCircle2 } from 'lucide-react'
+import { Database, Clock, ArrowUpRight, ShieldCheck, RefreshCw, CheckCircle2, Trash2 } from 'lucide-react'
 import type { Analysis, GitHubUser } from '../types'
-import { getAnalysisHistory } from '../services/apiService'
+import { getAnalysisHistory, clearAnalysisHistory } from '../services/apiService'
 
 interface PersistentHistoryDrawerProps {
   onSelectAnalysis: (analysis: Analysis) => void
@@ -20,6 +20,8 @@ export function PersistentHistoryDrawer({
   const [isOpen, setIsOpen] = useState(false)
   const [historyList, setHistoryList] = useState<Analysis[]>([])
   const [loading, setLoading] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const [clearedNotice, setClearedNotice] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date())
 
   const fetchHistory = async () => {
@@ -41,6 +43,21 @@ export function PersistentHistoryDrawer({
       setHistoryList([])
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleClearHistory = async () => {
+    setClearing(true)
+    try {
+      await clearAnalysisHistory()
+      setHistoryList([])
+      setClearedNotice(true)
+      setTimeout(() => setClearedNotice(false), 3000)
+    } catch (err) {
+      console.warn('[History] Could not clear persistent scans:', err)
+      setHistoryList([])
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -68,15 +85,31 @@ export function PersistentHistoryDrawer({
         </button>
 
         {isOpen && (
-          <button
-            type="button"
-            className="history-refresh-btn"
-            onClick={fetchHistory}
-            disabled={loading}
-            title="Refresh database records"
-          >
-            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button
+              type="button"
+              className="history-refresh-btn"
+              onClick={handleClearHistory}
+              disabled={loading || clearing}
+              title="Clear recent database records"
+              style={{ color: '#f87171' }}
+            >
+              {clearing ? (
+                <RefreshCw size={12} className="animate-spin" />
+              ) : (
+                <Trash2 size={12} />
+              )}
+            </button>
+            <button
+              type="button"
+              className="history-refresh-btn"
+              onClick={fetchHistory}
+              disabled={loading || clearing}
+              title="Refresh database records"
+            >
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </div>
         )}
       </div>
 
@@ -87,16 +120,45 @@ export function PersistentHistoryDrawer({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
         >
-          <div className="history-header">
+          <div className="history-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <p className="history-title">Persistent Database Records</p>
               <p className="history-sub">
                 Synced to Cloud Firestore · Saved automatically after every scan
               </p>
             </div>
-            <span className="history-count">
-              {historyList.length} saved {historyList.length === 1 ? 'scan' : 'scans'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {clearedNotice && (
+                <span style={{ fontSize: '11px', color: '#39f3c3', fontWeight: 500 }}>
+                  ✓ Cleared
+                </span>
+              )}
+              {historyList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearHistory}
+                  disabled={clearing}
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    color: '#f87171',
+                    borderRadius: '6px',
+                    padding: '3px 8px',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                  title="Clear all recent scans"
+                >
+                  <Trash2 size={11} /> Clear All
+                </button>
+              )}
+              <span className="history-count">
+                {historyList.length} saved {historyList.length === 1 ? 'scan' : 'scans'}
+              </span>
+            </div>
           </div>
 
           {loading && historyList.length === 0 ? (

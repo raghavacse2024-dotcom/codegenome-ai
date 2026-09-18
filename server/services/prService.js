@@ -252,37 +252,34 @@ export async function createPullRequest({
       }
     } catch (error) {
       console.warn('[PR Service] Live API attempt fallback:', error.message)
-      const compareUrl = `https://github.com/${owner}/${repository}/compare/${encodeURIComponent(targetBaseBranch)}...${encodeURIComponent(safeBranch)}?expand=1&title=${encodeURIComponent(prTitle)}&body=${encodeURIComponent(prBody)}`
       return {
         success: true,
         mode: 'ready',
         pushed: false,
-        prUrl: compareUrl,
+        prUrl: null,
         branch: safeBranch,
         baseBranch: targetBaseBranch,
         title: prTitle,
         body: prBody,
         patch,
         cliCommand,
-        message: `Changes prepared for ${owner}/${repository}! Opening GitHub Pull Request review interface...`,
+        message: `Changes prepared for ${owner}/${repository}! To create a live Pull Request on GitHub, GitHub requires authorization (PAT) to fork and push the branch to your account.`,
       }
     }
   }
 
   // Fallback when live API push token is restricted or unavailable:
-  const comparePrUrl = `https://github.com/${owner}/${repository}/compare/${encodeURIComponent(defaultBranch)}...${encodeURIComponent(safeBranch)}?expand=1&title=${encodeURIComponent(prTitle)}&body=${encodeURIComponent(prBody)}`
-
   return {
     success: true,
     mode: 'ready',
     pushed: false,
-    prUrl: comparePrUrl,
+    prUrl: null,
     branch: safeBranch,
     baseBranch: defaultBranch,
     title: prTitle,
     body: prBody,
     patch,
     cliCommand,
-    message: `Refactor branch '${safeBranch}' prepared for ${owner}/${repository}! Opening GitHub Pull Request review interface...`,
+    message: `Refactor branch '${safeBranch}' prepared for ${owner}/${repository}! Enter a GitHub Personal Access Token to fork and push automatically, or use the Git CLI patch below.`,
   }
 }

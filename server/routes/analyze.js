@@ -129,6 +129,38 @@ analyzeRouter.get('/history', async (request, response, next) => {
   }
 })
 
+// Clear persistent scan history for authenticated user
+analyzeRouter.delete('/history', async (request, response, next) => {
+  try {
+    const { clearUserAnalyses } = await import('../services/analysisStore.js')
+
+    let userId = null
+    const authHeader = request.headers.authorization
+    const tokenCandidate = authHeader?.startsWith('Bearer ') 
+      ? authHeader.slice(7).trim() 
+      : (typeof request.query.token === 'string' ? request.query.token.trim() : null)
+
+    if (tokenCandidate) {
+      const storedUser = getStoredUser(tokenCandidate)
+      userId = storedUser?.login || (tokenCandidate.startsWith('cg_') ? tokenCandidate : null)
+    }
+
+    const clientUserHeader = request.headers['x-github-user']
+    if (!userId && clientUserHeader && typeof clientUserHeader === 'string' && clientUserHeader.trim()) {
+      userId = clientUserHeader.trim()
+    }
+
+    if (!userId) {
+      return response.json({ success: true, cleared: 0 })
+    }
+
+    await clearUserAnalyses(userId)
+    response.json({ success: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
 // Retrieve single analysis from Firestore or cache by ID
 analyzeRouter.get('/analysis/:id', async (request, response, next) => {
   try {

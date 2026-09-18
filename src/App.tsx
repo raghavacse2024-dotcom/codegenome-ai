@@ -10,7 +10,7 @@ import { HeaderNav } from './components/HeaderNav'
 import { GitHubAuthModal } from './components/GitHubAuthModal'
 import { RepoSelector } from './components/RepoSelector'
 import { PersistentHistoryDrawer } from './components/PersistentHistoryDrawer'
-import { getCurrentUser, logoutUser, getSessionToken, setSessionToken, registerSession } from './services/apiService'
+import { getCurrentUser, logoutUser, getSessionToken, setSessionToken, registerSession, getGitHubPat } from './services/apiService'
 import { auth } from './services/firebase'
 import { useTheme } from './hooks/useTheme'
 import type { GitHubUser, Analysis } from './types'
@@ -25,9 +25,36 @@ const sections = [
 
 export default function App() {
   useTheme()
-  const [view, setView] = useState<'home' | 'cockpit'>('home')
-  const [url, setUrl] = useState('')
+  const [view, setView] = useState<'home' | 'cockpit'>(() => {
+    try {
+      const saved = localStorage.getItem('codegenome_current_view')
+      if (saved === 'cockpit' || saved === 'home') return saved as 'home' | 'cockpit'
+      if (window.location.hash === '#cockpit' || window.location.search.includes('cockpit')) return 'cockpit'
+    } catch {}
+    return 'cockpit' // Default to cockpit workspace so refresh always retains cockpit
+  })
+  const [url, setUrl] = useState(() => {
+    try {
+      return localStorage.getItem('codegenome_last_url') || ''
+    } catch {
+      return ''
+    }
+  })
   const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('codegenome_current_view', view)
+    } catch {}
+  }, [view])
+
+  useEffect(() => {
+    if (url) {
+      try {
+        localStorage.setItem('codegenome_last_url', url)
+      } catch {}
+    }
+  }, [url])
   const [user, setUser] = useState<GitHubUser | null>(() => {
     try {
       const cached = localStorage.getItem('codegenome_github_user')
@@ -70,9 +97,13 @@ export default function App() {
         try {
           localStorage.setItem('codegenome_github_user', JSON.stringify(ghUser))
         } catch {}
-        const sId = 'cg_google_' + firebaseUser.uid
-        setSessionToken(sId)
-        registerSession(sId, ghUser).catch(() => {})
+        const currentSession = getSessionToken()
+        const hasExistingGitHubAuth = currentSession && !currentSession.startsWith('cg_google_') && getGitHubPat()
+        if (!hasExistingGitHubAuth) {
+          const sId = 'cg_google_' + firebaseUser.uid
+          setSessionToken(sId)
+          registerSession(sId, ghUser).catch(() => {})
+        }
       }
     })
     return () => unsubscribe()

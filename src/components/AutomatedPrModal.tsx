@@ -93,7 +93,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
         baseBranch,
       })
       setResult(res)
-      if (res.prUrl) {
+      if (res.pushed && res.prUrl) {
         openPrUrl(res.prUrl)
       }
     } catch (err: any) {
@@ -442,13 +442,51 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                 />
               </div>
 
-              {!hasWriteToken && (
+              {hasWriteToken ? (
+                <div className="flex items-center gap-2.5 p-3 rounded-xl bg-[#064e3b]/30 border border-[#059669]/40 mb-4 text-xs text-[#34d399]">
+                  <CheckCircle size={16} className="text-[#39f3c3] flex-shrink-0" />
+                  <div>
+                    <span className="font-semibold text-white">GitHub Write Permissions Active:</span>{' '}
+                    <span>Your session has repository write access authorized. CodeGenome will automatically fork, push the branch, and open your live Pull Request on GitHub.</span>
+                  </div>
+                </div>
+              ) : (
                 <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-[#081b26] border border-[#164e63]/30 mb-4 text-sm">
                   <div className="flex items-start gap-2 text-xs text-cyan-200">
                     <AlertCircle size={15} className="text-[#39f3c3] flex-shrink-0 mt-0.5" />
                     <div>
-                      <strong className="font-semibold block mb-0.5 text-white">Automated Push Token (Optional)</strong>
-                      To allow CodeGenome to directly fork and push the refactored branch to your GitHub account, provide a Personal Access Token with repo scope below. Otherwise, CodeGenome will generate the branch changes and open the Pull Request review interface directly on GitHub.
+                      <strong className="font-semibold block mb-0.5 text-white">GitHub Write Authorization (For Live PR)</strong>
+                      To push the refactored branch to GitHub and create a live Pull Request, GitHub requires authorization with <code>repo</code> scope. (If you connect your token once during login, it is saved permanently).
+                      <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowAuthModal(true)}
+                          style={{
+                            padding: '6px 12px',
+                            background: '#24292e',
+                            border: '1px solid #39f3c3',
+                            borderRadius: '6px',
+                            color: '#ffffff',
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          <GitBranch size={12} className="text-[#39f3c3]" />
+                          <span>1-Click Authorize with GitHub (Write Access)</span>
+                        </button>
+                        <a 
+                          href="https://github.com/settings/tokens/new?scopes=repo&description=CodeGenome+AI+PR+Integration" 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          style={{ color: '#39f3c3', textDecoration: 'underline', fontSize: '11px' }}
+                        >
+                          Or generate token on GitHub &rarr;
+                        </a>
+                      </div>
                     </div>
                   </div>
                   
@@ -457,7 +495,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                       <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '11px', color: '#94a3b8' }} />
                       <input
                         type="password"
-                        placeholder="GitHub PAT (ghp_... or github_pat_...) [Optional]"
+                        placeholder="Paste your GitHub Personal Access Token (ghp_...) [Optional]"
                         value={patInput}
                         onChange={(e) => setPatInput(e.target.value)}
                         style={{
@@ -494,12 +532,17 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                   {loading ? (
                     <>
                       <Loader2 size={14} className="spin-icon animate-spin" />
-                      <span>Preparing & Opening Pull Request...</span>
+                      <span>{hasWriteToken || patInput.trim() ? 'Pushing Branch & Creating PR...' : 'Compiling Refactor Package...'}</span>
+                    </>
+                  ) : hasWriteToken || patInput.trim() ? (
+                    <>
+                      <GitPullRequest size={14} />
+                      <span>Fork, Push & Create Live PR</span>
                     </>
                   ) : (
                     <>
                       <GitPullRequest size={14} />
-                      <span>Create Pull Request</span>
+                      <span>Generate Patch & Prepare PR</span>
                     </>
                   )}
                 </button>
