@@ -1,5 +1,5 @@
 export type Scaffold = { path: string; content: string }
-export type QaAnswer = { answer: string; confidence: number; sourceFiles: string[] }
+export type QaAnswer = { answer: string; confidence?: number; sourceFiles?: string[]; provider?: string }
 export type GitHubUser = {
   login: string
   name: string

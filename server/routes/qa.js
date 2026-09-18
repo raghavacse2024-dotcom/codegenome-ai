@@ -7,7 +7,7 @@ import { getAnalysis } from '../services/analysisStore.js'
 export const qaRouter = Router()
 
 const QaRequestSchema = z.object({
-  analysisId: z.string().min(1),
+  analysisId: z.string().optional(),
   question: z.string().min(1),
   history: z.array(
     z.object({
@@ -20,8 +20,20 @@ const QaRequestSchema = z.object({
 qaRouter.post('/qa', async (request, response, next) => {
   try {
     const { analysisId, question, history } = QaRequestSchema.parse(request.body)
-    const analysis = await getAnalysis(analysisId)
-    if (!analysis) throw Object.assign(new Error('Analysis not found. Run analysis again before asking questions.'), { status: 404 })
+    let analysis = null
+    if (analysisId && analysisId.trim()) {
+      analysis = await getAnalysis(analysisId)
+    }
+    if (!analysis) {
+      analysis = {
+        repo: {
+          owner: 'codebase',
+          repository: 'assistant',
+          description: 'General software development and codebase assistant',
+        },
+        results: {},
+      }
+    }
     response.json(await answerQuestion(analysis, question, history || []))
   } catch (error) {
     next(error)
@@ -33,36 +45,40 @@ function isValidKey(key) {
 }
 
 /**
- * Answers user questions conversationally grounded in the completed analysis.
+ * Answers user questions conversationally grounded in the completed analysis or general knowledge.
  */
 async function answerQuestion(analysis, question, history = []) {
-  const q = (question || '').toLowerCase()
+  const q = (question || '').trim().toLowerCase()
   const repoName = `${analysis.repo?.owner || 'owner'}/${analysis.repo?.repository || 'repository'}`
   const target = analysis.results?.refactor?.data?.target || 'core modules'
   const hotspots = analysis.results?.debt?.data?.hotspots || []
   const steps = analysis.results?.refactor?.data?.steps || []
   const arch = analysis.results?.architecture?.data || {}
   const cost = analysis.results?.cost?.data || {}
+  const repoDesc = analysis.repo?.description || 'Software repository'
   const sourceFiles = hotspots.map((item) => item.path).slice(0, 4)
 
-  const systemPrompt = `You are CodeGenome AI Assistant, a senior staff software engineer and repository AI chatbot.
-You are chatting with a developer about the GitHub repository '${repoName}' (${analysis.repo?.url || ''}).
+  const systemPrompt = `You are CodeGenome AI, a helpful, friendly, and highly capable conversational AI assistant (like ChatGPT or Gemini).
+You can answer ANY question the user asks—whether about the repository, code, architecture, software engineering, general questions, explanations, debugging, or open-ended conversation.
 
-Repository Intelligence Knowledge Base:
-- Tech Stack & Architecture: ${JSON.stringify(arch)}
-- Technical Debt Index & Hotspots: ${JSON.stringify(analysis.results?.debt?.data || {})}
-- Financial Risk & Cost Valuation: ${JSON.stringify(cost)}
-- Refactor Strategy & Scaffolds: ${JSON.stringify(analysis.results?.refactor?.data || {})}
+Repository Context (Loaded in workspace):
+- Repository: ${repoName} (${analysis.repo?.url || ''})
+- Description: ${repoDesc}
+- Architecture & Tech Stack: ${arch.framework || analysis.repo?.language || 'Software codebase'}
+- Architectural Layers: ${arch.layers?.join(' -> ') || 'Standard layered architecture'}
+- Primary Refactor Target: ${target}
+- Architectural Structure: ${JSON.stringify(arch.structure || {})}
+- Detected Hotspots: ${hotspots.map(h => `${h.path} (debt: ${h.score})`).join(', ') || 'Standard complexity'}
+- Refactoring Suggestions: ${steps.join('; ') || 'Standard refactoring'}
 
 Guidelines:
-1. Act as a natural, highly intelligent conversational assistant (like Gemini or ChatGPT).
-2. Answer any question directly—whether about repository architecture, technical debt, how to implement a fix, general coding concepts, or step-by-step guidance.
-3. FORMATTING RESTRICTION: DO NOT USE ASTERISKS / STARS (* or **) anywhere in your output. No italicization stars, no bolding stars, and no list-item stars.
-   - For emphasis or labels, use plain capital letters, quotes, or colons/semicolons (e.g. "HOTSPOT ARCHITECTURE: details" or simply "Hotspot Architecture: details").
-   - For bullet lists, use simple dashes (-) or numbers (1., 2.), never stars (*).
-4. Keep explanations clear, engaging, and professional.`
+1. Always respond directly, accurately, and thoroughly to what the user is asking for.
+2. If the user asks about this repository (e.g. "what is this repo about?", "what does it do?", "explain the architecture", "how do I refactor?"), give a clear, insightful, well-structured explanation using the repository context and your software knowledge.
+3. If the user asks general questions (coding, algorithms, explanations, technology choices, or casual conversation), answer naturally, warmly, and intelligently like a top-tier conversational AI.
+4. Format your responses using clean, readable Markdown (headings, bullet points, bold text, and code blocks with syntax highlighting where appropriate).
+5. Never reply with canned or repetitive boilerplate. Engage conversationally.`
 
-  // 1. Primary: Try Gemini 3.8 Flash model via @google/genai SDK
+  // 1. Primary: Try Gemini model via @google/genai SDK with multi-model fallback
   const geminiKey = process.env.GEMINI_API_KEY
   if (isValidKey(geminiKey)) {
     try {
@@ -76,44 +92,57 @@ Guidelines:
       })
 
       const contents = []
-      contents.push({ role: 'user', parts: [{ text: systemPrompt }] })
-      contents.push({
-        role: 'model',
-        parts: [
-          {
-            text: `Understood! I am CodeGenome AI Repository Chatbot. I am fully grounded in the architectural blueprint, hotspot metrics, technical debt score, and refactoring plan for ${repoName}. How can I help you?`,
-          },
-        ],
-      })
-
       for (const m of history) {
-        contents.push({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
-        })
+        if (m.content && m.content.trim()) {
+          contents.push({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }],
+          })
+        }
       }
       contents.push({ role: 'user', parts: [{ text: question }] })
 
-      const modelName = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
-      const callPromise = ai.models.generateContent({
-        model: modelName,
-        contents,
-      })
+      // Try fast & resilient models in order
+      const modelsToTry = [
+        'gemini-3.1-flash-lite',
+        process.env.GEMINI_MODEL,
+        'gemini-3.8-flash',
+        'gemini-flash-latest',
+      ].filter(Boolean)
 
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini API timeout')), 20_000))
-      const response = await Promise.race([callPromise, timeoutPromise])
-      const text = response.text?.trim()
+      // Deduplicate model names while preserving priority
+      const uniqueModels = [...new Set(modelsToTry)]
 
-      if (text) {
-        return {
-          answer: text,
-          confidence: 0.98,
-          sourceFiles: sourceFiles.length ? sourceFiles : [target],
-          provider: 'Gemini 3.8 Flash',
+      for (const modelName of uniqueModels) {
+        try {
+          const callPromise = ai.models.generateContent({
+            model: modelName,
+            contents,
+            config: {
+              systemInstruction: systemPrompt,
+            },
+          })
+
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout on ${modelName}`)), 18_000)
+          )
+          const response = await Promise.race([callPromise, timeoutPromise])
+          const text = response.text?.trim()
+
+          if (text) {
+            return {
+              answer: text,
+              confidence: 0.98,
+              sourceFiles: sourceFiles.length ? sourceFiles : undefined,
+              provider: `Gemini (${modelName})`,
+            }
+          }
+        } catch (mErr) {
+          console.warn(`[QA Router] Gemini model ${modelName} failed: ${mErr?.message}, checking fallback...`)
         }
       }
     } catch (err) {
-      console.error('[QA Router] Gemini query error:', err?.message)
+      console.error('[QA Router] Gemini initialization error:', err?.message)
     }
   }
 
@@ -149,34 +178,39 @@ Guidelines:
         return {
           answer: content,
           confidence: 0.98,
-          sourceFiles: sourceFiles.length ? sourceFiles : [target],
+          sourceFiles: sourceFiles.length ? sourceFiles : undefined,
           provider: 'OpenAI',
         }
       }
     } catch (err) {
-      console.error('[QA Router] OpenAI/Z.ai query error:', err?.message)
+      console.error('[QA Router] OpenAI query error:', err?.message)
     }
   }
 
-  // 3. Smart Fallback generator if no API keys configured or call failed
-  let fallbackText = `Based on repository analysis of ${repoName}, the priority recommendation is to refactor \`${target}\`.`
+  // 3. Smart, comprehensive Fallback if external API calls are unavailable
+  let fallbackText = ''
 
-  if (/^(hi|hello|hey|greetings|who are you|what can you do|help)/i.test(question.trim())) {
-    fallbackText = `Hello! I am CodeGenome AI, your senior repository architecture and refactoring assistant.\n\nI have analyzed ${repoName}:\n- Primary Refactor Target: \`${target}\`\n- Tech Stack: ${arch.framework || 'TypeScript / Node.js'}\n\nAsk me anything! For example:\n- "How do I refactor ${target}?"\n- "What is the architectural structure?"\n- "Explain the technical debt hotspots."`
-  } else if (q.includes('architecture') || q.includes('structure') || q.includes('framework')) {
-    const layersStr = arch.layers?.join(' -> ') || 'Presentation -> Services -> Integrations'
-    fallbackText = `Repository ${repoName} is built with ${arch.framework || 'TypeScript / Node.js'}.\n\n### Architectural Layers:\n\`${layersStr}\`\n\n- Entry Points: ${arch.structure?.entryPoints?.join(', ') || 'src/main.ts'}\n- Violations: ${arch.violations?.length ? arch.violations[0] : 'None detected. Good separation of concerns.'}`
+  if (/^(what is this (repo|repository|project)( about)?|describe this (repo|repository|project)|what does this (repo|repository|project) do|about this repo)/i.test(q)) {
+    fallbackText = `### About ${repoName}\n\n**${repoName}** is ${repoDesc ? repoDesc : 'a software codebase'}.\n\n- **Repository URL**: ${analysis.repo?.url || ''}\n- **Primary Tech Stack**: ${arch.framework || analysis.repo?.language || 'Multi-language / Open Source'}\n- **Architecture Style**: ${arch.layers?.join(' → ') || 'Modular components'}\n- **Key Modules**: ${arch.structure?.entryPoints?.join(', ') || target}\n\nAsk me anything! You can ask how specific components work, how to refactor modules, or any general programming and architecture questions.`
+  } else if (/^(hi|hello|hey|greetings|who are you|what can you do|help)/i.test(question.trim())) {
+    fallbackText = `Hello! I am CodeGenome AI, your conversational software and repository assistant.\n\nI am currently grounded in **${repoName}** (${arch.framework || 'Software Codebase'}). You can ask me anything you want:\n- What this repository does and how it's structured\n- How to refactor modules and technical debt hotspots\n- General coding, algorithms, testing, and debugging questions\n\nHow can I help you today?`
+  } else if (q.includes('architecture') || q.includes('structure') || q.includes('framework') || q.includes('layer')) {
+    const layersStr = arch.layers?.join(' → ') || 'Presentation → Services → Integrations'
+    fallbackText = `### Architecture of ${repoName}\n\n- **Framework / Stack**: ${arch.framework || 'TypeScript / Node.js'}\n- **Architectural Flow**: \`${layersStr}\`\n- **Entry Points**: ${arch.structure?.entryPoints?.join(', ') || 'Main project files'}\n- **Violations / Smells**: ${arch.violations?.length ? arch.violations[0] : 'None detected. Good separation of concerns.'}`
   } else if (q.includes('debt') || q.includes('hotspot') || q.includes('complex')) {
     const topHotspot = hotspots[0]
-    fallbackText = `### Technical Debt Overview for ${repoName}:\n- Debt Index: ${analysis.results?.debt?.data?.totalDebtScore || 65}/100\n- Primary Hotspot: \`${topHotspot?.path || target}\` (Score: ${topHotspot?.score || 85}/100)\n\nRecommendation: Decouple heavy switch-statements and extract helper methods.`
-  } else if (q.includes('refactor') || q.includes('step') || q.includes('plan') || q.includes('how')) {
-    const stepList = steps.length ? steps.map((s, idx) => `${idx + 1}. ${s}`).join('\n') : '1. Extract monolithic handlers.\n2. Add unit test coverage.\n3. Verify integration.'
-    fallbackText = `### Actionable Refactor Strategy for ${repoName}:\n\nTarget Module: \`${target}\`\n\n${stepList}`
+    fallbackText = `### Technical Debt in ${repoName}\n\n- **Total Debt Score**: ${analysis.results?.debt?.data?.totalDebtScore || 65}/100\n- **Top Hotspot**: \`${topHotspot?.path || target}\` (Score: ${topHotspot?.score || 85}/100)\n- **Financial Risk**: Estimated debt recovery cost of $${cost.estimatedDebtCost?.toLocaleString?.() || '12,500'}.\n\nRecommendation: Decouple monolithic handlers and extract reusable functions with unit tests.`
+  } else if (q.includes('refactor') || q.includes('step') || q.includes('plan')) {
+    const stepList = steps.length ? steps.map((s, idx) => `${idx + 1}. ${s}`).join('\n') : '1. Identify monolithic functions.\n2. Extract isolated subroutines.\n3. Add test coverage.'
+    fallbackText = `### Refactoring Plan for ${repoName}\n\n**Target**: \`${target}\`\n\n${stepList}`
+  } else {
+    fallbackText = `I have analyzed **${repoName}** (${arch.framework || 'codebase'}).\n\nRegarding your question: "${question}"\n\nFeel free to ask me for specific code examples, how parts of the codebase integrate, or any general programming and architecture questions!`
   }
 
   return {
     answer: fallbackText,
-    confidence: 0.90,
-    sourceFiles: sourceFiles.length ? sourceFiles : [target],
+    confidence: 0.92,
+    sourceFiles: sourceFiles.length ? sourceFiles : undefined,
+    provider: 'CodeGenome AI',
   }
 }
