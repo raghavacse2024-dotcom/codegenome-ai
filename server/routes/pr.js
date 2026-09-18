@@ -76,6 +76,12 @@ prRouter.post('/pr/create', async (req, res, next) => {
       }
     }
 
+    filesToCommit.forEach(f => {
+      if (f.path.startsWith('/')) {
+        f.path = f.path.substring(1)
+      }
+    })
+
     if (filesToCommit.length === 0) {
       return res.status(400).json({ error: 'No code changes found in this analysis to push to GitHub.' })
     }
