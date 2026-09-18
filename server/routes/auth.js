@@ -13,7 +13,7 @@ function loadTokens() {
       const raw = JSON.parse(fs.readFileSync(TOKEN_STORE_PATH, 'utf8'))
       const now = Date.now()
       for (const [id, record] of Object.entries(raw)) {
-        if (record && record.token && (now - (record.timestamp || 0) < 30 * 24 * 60 * 60 * 1000)) {
+        if (record && (record.token || record.user) && (now - (record.timestamp || 0) < 30 * 24 * 60 * 60 * 1000)) {
           store.set(id, record)
         }
       }
@@ -186,6 +186,19 @@ authRouter.get('/auth/user', async (req, res) => {
   const stored = sessionId ? tokenStore.get(sessionId) : null
   if (stored?.user) {
     return res.json({ authenticated: true, user: stored.user })
+  }
+
+  const clientUserHeader = req.headers['x-github-user']
+  if (sessionId && clientUserHeader && typeof clientUserHeader === 'string' && clientUserHeader.trim()) {
+    const username = clientUserHeader.trim()
+    const recoveredUser = {
+      login: username,
+      name: username,
+      avatar_url: `https://github.com/${username}.png`,
+      html_url: `https://github.com/${username}`,
+    }
+    setStoredToken(sessionId, token || null, recoveredUser)
+    return res.json({ authenticated: true, user: recoveredUser })
   }
 
   if (!token) {

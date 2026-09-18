@@ -54,38 +54,8 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
   )
   const hasWriteToken = Boolean(pat || (getSessionToken() && !isGoogleOrFallbackSession))
 
-  // Helper to open and prime the redirect window
-  function createRedirectWindow(): Window | null {
-    const w = window.open('about:blank', '_blank')
-    if (w) {
-      try {
-        w.document.title = "Redirecting to GitHub Pull Request..."
-        w.document.body.innerHTML = `
-          <div style="font-family:system-ui,-apple-system,sans-serif;background:#091220;color:#e8f1fb;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0;padding:24px;box-sizing:border-box;text-align:center;">
-            <div style="width:44px;height:44px;border:3px solid rgba(57,243,195,0.2);border-top-color:#39f3c3;border-radius:50%;animation:spin 0.9s linear infinite;margin-bottom:20px;"></div>
-            <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
-            <h2 style="font-size:20px;font-weight:600;margin:0 0 10px 0;color:#39f3c3;">Pushing to GitHub & Opening Pull Request...</h2>
-            <p style="font-size:14px;color:#8cafd2;max-width:440px;margin:0 0 16px 0;line-height:1.5;">Forking repository, committing refactored files, and preparing the GitHub review interface.</p>
-            <p style="font-size:12px;color:#64748b;margin:0;">You will be automatically redirected to GitHub in a few seconds...</p>
-          </div>
-        `
-      } catch {}
-    }
-    return w
-  }
-
-  function navigateToPr(url: string, targetWindow: Window | null) {
-    if (targetWindow && !targetWindow.closed) {
-      try {
-        targetWindow.location.href = url
-        return
-      } catch {
-        try {
-          targetWindow.location.replace(url)
-          return
-        } catch {}
-      }
-    }
+  function openPrUrl(url: string) {
+    if (!url) return
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 
@@ -100,17 +70,9 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    
-    // Auth gate check
-    if (!getSessionToken() && !getGitHubPat() && !patInput.trim()) {
-      setShowAuthModal(true)
-      return
-    }
 
     setLoading(true)
     setError(null)
-
-    const prWindow = createRedirectWindow()
 
     // Save PAT if entered in-form
     const cleanPat = patInput.trim()
@@ -132,32 +94,12 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
       })
       setResult(res)
       if (res.prUrl) {
-        navigateToPr(res.prUrl, prWindow)
-      } else if (prWindow) {
-        prWindow.close()
+        openPrUrl(res.prUrl)
       }
     } catch (err: any) {
-      if (prWindow) prWindow.close()
       const errMsg = err?.message || 'Failed to generate Pull Request.'
       setError(errMsg)
       setForceShowPat(true)
-      
-      if (
-        errMsg.toLowerCase().includes('session has expired') || 
-        errMsg.toLowerCase().includes('reconnect') ||
-        errMsg.toLowerCase().includes('401')
-      ) {
-        // Clear cached storage keys
-        try {
-          localStorage.removeItem('codegenome_github_session')
-          localStorage.removeItem('codegenome_github_pat')
-          localStorage.removeItem('codegenome_github_user')
-        } catch {}
-        
-        setTimeout(() => {
-          setShowAuthModal(true)
-        }, 500)
-      }
     } finally {
       setLoading(false)
     }
@@ -363,15 +305,8 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                       type="button"
                       className="pr-btn pr-btn--primary w-full mt-1.5 justify-center"
                       onClick={async () => {
-                        if (!hasWriteToken && !patInput.trim()) {
-                          setError('Please paste a GitHub Personal Access Token first.');
-                          setForceShowPat(true);
-                          return;
-                        }
                         setLoading(true);
                         setError(null);
-
-                        const prWindow = createRedirectWindow();
 
                         const cleanPat = patInput.trim();
                         if (cleanPat) {
@@ -391,29 +326,12 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                           });
                           setResult(res);
                           if (res.prUrl) {
-                            navigateToPr(res.prUrl, prWindow);
-                          } else if (prWindow) {
-                            prWindow.close();
+                            openPrUrl(res.prUrl);
                           }
                         } catch (err: any) {
-                          if (prWindow) prWindow.close();
                           const errMsg = err?.message || 'Failed to create real Pull Request.'
                           setError(errMsg);
                           setForceShowPat(true);
-                          
-                          if (
-                            errMsg.toLowerCase().includes('session has expired') || 
-                            errMsg.toLowerCase().includes('reconnect') ||
-                            errMsg.toLowerCase().includes('401')
-                          ) {
-                            try {
-                              localStorage.removeItem('codegenome_github_session');
-                              localStorage.removeItem('codegenome_github_pat');
-                              localStorage.removeItem('codegenome_github_user');
-                            } catch {}
-                            
-                            setTimeout(() => setShowAuthModal(true), 500);
-                          }
                         } finally {
                           setLoading(false);
                         }
@@ -525,27 +443,26 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
               </div>
 
               {!hasWriteToken && (
-                <div className="flex flex-col gap-3.5 p-4 rounded-xl bg-[#081b26] border border-[#164e63]/30 mb-5 text-sm">
-                  <div className="flex items-start gap-2.5 text-xs text-cyan-200">
-                    <AlertCircle size={16} className="text-[#39f3c3] flex-shrink-0 mt-0.5" />
+                <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-[#081b26] border border-[#164e63]/30 mb-4 text-sm">
+                  <div className="flex items-start gap-2 text-xs text-cyan-200">
+                    <AlertCircle size={15} className="text-[#39f3c3] flex-shrink-0 mt-0.5" />
                     <div>
-                      <strong className="font-semibold block mb-0.5 text-white">Live GitHub Push Permission Integration</strong>
-                      You are signed in conceptually, but there is no connected GitHub Write Token. 
-                      To automatically fork this repository, commit your changes, and submit a Pull Request on your behalf, please paste a <strong>GitHub Personal Access Token (PAT)</strong> with <code className="bg-[#0b172a] px-1 py-0.5 rounded text-[#39f3c3]">repo</code> permissions below:
+                      <strong className="font-semibold block mb-0.5 text-white">Automated Push Token (Optional)</strong>
+                      To allow CodeGenome to directly fork and push the refactored branch to your GitHub account, provide a Personal Access Token with repo scope below. Otherwise, CodeGenome will generate the branch changes and open the Pull Request review interface directly on GitHub.
                     </div>
                   </div>
                   
-                  <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-1.5">
                     <div className="input-with-icon" style={{ position: 'relative' }}>
-                      <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
+                      <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '11px', color: '#94a3b8' }} />
                       <input
                         type="password"
-                        placeholder="Paste your GitHub PAT (ghp_... or github_pat_...)"
+                        placeholder="GitHub PAT (ghp_... or github_pat_...) [Optional]"
                         value={patInput}
                         onChange={(e) => setPatInput(e.target.value)}
                         style={{
                           width: '100%',
-                          padding: '10px 12px 10px 32px',
+                          padding: '8px 12px 8px 32px',
                           background: 'rgba(0,0,0,0.5)',
                           border: '1px solid rgba(255,255,255,0.1)',
                           borderRadius: '8px',
@@ -556,9 +473,6 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                         }}
                       />
                     </div>
-                    <p className="text-[10px] text-slate-400 leading-normal" style={{ margin: 0 }}>
-                      We securely proxy your PAT directly to GitHub to perform the git commands. It is never permanently stored on our servers. Alternatively, leave it blank to generate an offline Git patch/CLI commands!
-                    </p>
                   </div>
                 </div>
               )}
@@ -574,23 +488,13 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                 </button>
                 <button
                   type="submit"
-                  className={`pr-btn ${(!hasWriteToken && !patInput.trim()) ? 'pr-btn--secondary' : 'pr-btn--primary'}`}
+                  className="pr-btn pr-btn--primary"
                   disabled={loading}
                 >
                   {loading ? (
                     <>
-                      <Loader2 size={14} className="spin-icon" />
-                      <span>{(!hasWriteToken && !patInput.trim()) ? 'Generating Patch...' : 'Creating PR...'}</span>
-                    </>
-                  ) : (!hasWriteToken && !patInput.trim()) ? (
-                    <>
-                      <Download size={14} />
-                      <span>Generate Offline Patch</span>
-                    </>
-                  ) : (!getSessionToken() && !patInput.trim()) ? (
-                    <>
-                      <Key size={14} />
-                      <span>Connect GitHub &amp; Create PR</span>
+                      <Loader2 size={14} className="spin-icon animate-spin" />
+                      <span>Preparing & Opening Pull Request...</span>
                     </>
                   ) : (
                     <>
@@ -610,9 +514,6 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
         onClose={() => setShowAuthModal(false)}
         onSuccess={() => {
           setShowAuthModal(false)
-          // Re-submit PR request with newly attached token
-          const fakeEvt = { preventDefault: () => {} } as React.FormEvent
-          handleSubmit(fakeEvt)
         }}
       />
     </div>

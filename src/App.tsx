@@ -10,7 +10,8 @@ import { HeaderNav } from './components/HeaderNav'
 import { GitHubAuthModal } from './components/GitHubAuthModal'
 import { RepoSelector } from './components/RepoSelector'
 import { PersistentHistoryDrawer } from './components/PersistentHistoryDrawer'
-import { getCurrentUser, logoutUser } from './services/apiService'
+import { getCurrentUser, logoutUser, getSessionToken, setSessionToken, registerSession } from './services/apiService'
+import { auth } from './services/firebase'
 import { useTheme } from './hooks/useTheme'
 import type { GitHubUser, Analysis } from './types'
 
@@ -50,27 +51,61 @@ export default function App() {
       try {
         localStorage.setItem('codegenome_github_user', JSON.stringify(user))
       } catch {}
-    } else {
-      try {
-        localStorage.removeItem('codegenome_github_user')
-      } catch {}
     }
   }, [user])
 
+  // Listen for Firebase Auth persistence (e.g. Google Sign-In)
   useEffect(() => {
-    // Check if user has an existing session
+    const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
+      if (firebaseUser) {
+        const userEmail = firebaseUser.email || ''
+        const username = userEmail ? userEmail.split('@')[0] : 'developer'
+        const ghUser: GitHubUser = {
+          login: username,
+          name: firebaseUser.displayName || username,
+          avatar_url: firebaseUser.photoURL || `https://github.com/${username}.png`,
+          html_url: `https://github.com/${username}`,
+        }
+        setUser(ghUser)
+        try {
+          localStorage.setItem('codegenome_github_user', JSON.stringify(ghUser))
+        } catch {}
+        const sId = 'cg_google_' + firebaseUser.uid
+        setSessionToken(sId)
+        registerSession(sId, ghUser).catch(() => {})
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // Check and synchronize session with backend
+  useEffect(() => {
+    const cached = localStorage.getItem('codegenome_github_user')
+    let cachedUser: GitHubUser | null = null
+    try {
+      if (cached) cachedUser = JSON.parse(cached)
+    } catch {}
+
     getCurrentUser()
       .then((res) => {
         if (res.authenticated && res.user) {
           setUser(res.user)
-        } else {
-          // Stale session detected, clear local state
-          setUser(null)
-          logoutUser().catch(() => {})
+          try {
+            localStorage.setItem('codegenome_github_user', JSON.stringify(res.user))
+          } catch {}
+        } else if (cachedUser) {
+          // Never log user out on refresh if cached profile exists; re-sync session with server
+          setUser(cachedUser)
+          const sId = getSessionToken() || `cg_session_${cachedUser.login}`
+          setSessionToken(sId)
+          registerSession(sId, cachedUser).catch(() => {})
         }
       })
       .catch(() => {
-        // If query fails, keep current state to remain resilient
+        // Keep cached state resiliently on any network hiccups
+        if (cachedUser) {
+          setUser(cachedUser)
+        }
       })
   }, [])
 
@@ -139,7 +174,15 @@ export default function App() {
         user={user}
         onOpenAuth={() => setAuthModalOpen(true)}
         onLogout={async () => {
-          await logoutUser()
+          try {
+            await auth.signOut()
+          } catch {}
+          try {
+            localStorage.removeItem('codegenome_github_user')
+            localStorage.removeItem('codegenome_github_session')
+            localStorage.removeItem('codegenome_github_pat')
+          } catch {}
+          await logoutUser().catch(() => {})
           setUser(null)
         }}
       />

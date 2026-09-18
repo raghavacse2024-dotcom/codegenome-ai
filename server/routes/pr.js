@@ -42,14 +42,6 @@ prRouter.post('/pr/create', async (req, res, next) => {
       if (raw.startsWith('cg_')) {
         token = getStoredToken(raw)
         user = getStoredUser(raw)
-        
-        // If they provided a CodeGenome session but it's not in the store (e.g. server restarted or revoked)
-        // and no custom PAT was provided, return 401 with a clear message to prompt for token / re-login
-        if (!token && !customPat) {
-          return res.status(401).json({
-            error: 'Your GitHub session has expired or is not connected. Please reconnect your GitHub account or paste a GitHub Personal Access Token (PAT) below.'
-          })
-        }
       } else {
         token = raw
       }
@@ -59,12 +51,6 @@ prRouter.post('/pr/create', async (req, res, next) => {
     }
     if (!token && process.env.GITHUB_TOKEN) {
       token = process.env.GITHUB_TOKEN.trim()
-    }
-
-    if (!token) {
-      return res.status(401).json({
-        error: 'GitHub write authorization required. Please connect your GitHub account or provide a GitHub Personal Access Token (PAT) with repo permissions to push this branch and create a Pull Request.'
-      })
     }
 
     const refactorData = analysis.results?.refactor?.data || {}

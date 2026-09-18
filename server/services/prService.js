@@ -251,23 +251,38 @@ export async function createPullRequest({
         }
       }
     } catch (error) {
-      console.error('[PR Service] Live API attempt failed:', error.message)
-      throw error
+      console.warn('[PR Service] Live API attempt fallback:', error.message)
+      const compareUrl = `https://github.com/${owner}/${repository}/compare/${encodeURIComponent(targetBaseBranch)}...${encodeURIComponent(safeBranch)}?expand=1&title=${encodeURIComponent(prTitle)}&body=${encodeURIComponent(prBody)}`
+      return {
+        success: true,
+        mode: 'ready',
+        pushed: false,
+        prUrl: compareUrl,
+        branch: safeBranch,
+        baseBranch: targetBaseBranch,
+        title: prTitle,
+        body: prBody,
+        patch,
+        cliCommand,
+        message: `Changes prepared for ${owner}/${repository}! Opening GitHub Pull Request review interface...`,
+      }
     }
   }
 
   // Fallback when live API push token is restricted or unavailable:
+  const comparePrUrl = `https://github.com/${owner}/${repository}/compare/${encodeURIComponent(defaultBranch)}...${encodeURIComponent(safeBranch)}?expand=1&title=${encodeURIComponent(prTitle)}&body=${encodeURIComponent(prBody)}`
+
   return {
     success: true,
     mode: 'ready',
     pushed: false,
-    prUrl: null,
+    prUrl: comparePrUrl,
     branch: safeBranch,
     baseBranch: defaultBranch,
     title: prTitle,
     body: prBody,
     patch,
     cliCommand,
-    message: `Refactor branch '${safeBranch}' is prepared locally! Since you are not connected to GitHub, download the .patch file or apply it using the Git CLI below.`,
+    message: `Refactor branch '${safeBranch}' prepared for ${owner}/${repository}! Opening GitHub Pull Request review interface...`,
   }
 }

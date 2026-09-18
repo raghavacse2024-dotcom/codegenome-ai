@@ -297,8 +297,22 @@ export function authenticateWithToken(token: string) {
  * Fetches current authenticated user status
  */
 export function getCurrentUser() {
+  const cached = localStorage.getItem('codegenome_github_user')
+  let username: string | undefined
+  try {
+    if (cached) {
+      username = JSON.parse(cached)?.login
+    }
+  } catch {}
+
+  const headers: Record<string, string> = {}
+  if (username) {
+    headers['X-GitHub-User'] = username
+  }
+
   return request<{ authenticated: boolean; user: GitHubUser | null }>('/api/auth/user', {
     method: 'GET',
+    headers,
   })
 }
 
