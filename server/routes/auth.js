@@ -1,18 +1,55 @@
 import { Router } from 'express'
+import fs from 'node:fs'
+import path from 'node:path'
 
 export const authRouter = Router()
 
-// In-memory token store mapped by session ID (or user can pass bearer token from client)
-const tokenStore = new Map()
+const TOKEN_STORE_PATH = path.resolve(process.cwd(), '.token_store.json')
 
-// Cleanup old tokens after 24 hours
+function loadTokens() {
+  const store = new Map()
+  try {
+    if (fs.existsSync(TOKEN_STORE_PATH)) {
+      const raw = JSON.parse(fs.readFileSync(TOKEN_STORE_PATH, 'utf8'))
+      const now = Date.now()
+      for (const [id, record] of Object.entries(raw)) {
+        if (record && record.token && (now - (record.timestamp || 0) < 30 * 24 * 60 * 60 * 1000)) {
+          store.set(id, record)
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Auth] Could not load persisted token store:', err.message)
+  }
+  return store
+}
+
+function saveTokens(store) {
+  try {
+    const obj = {}
+    for (const [id, record] of store.entries()) {
+      obj[id] = record
+    }
+    fs.writeFileSync(TOKEN_STORE_PATH, JSON.stringify(obj, null, 2), 'utf8')
+  } catch (err) {
+    console.warn('[Auth] Could not save token store:', err.message)
+  }
+}
+
+// Persistent token store mapped by session ID
+const tokenStore = loadTokens()
+
+// Cleanup old tokens after 30 days
 setInterval(() => {
   const now = Date.now()
+  let changed = false
   for (const [id, record] of tokenStore.entries()) {
-    if (now - record.timestamp > 24 * 60 * 60 * 1000) {
+    if (now - record.timestamp > 30 * 24 * 60 * 60 * 1000) {
       tokenStore.delete(id)
+      changed = true
     }
   }
+  if (changed) saveTokens(tokenStore)
 }, 60 * 60 * 1000)
 
 export function getStoredToken(sessionId) {
@@ -28,10 +65,14 @@ export function getStoredUser(sessionId) {
 export function setStoredToken(sessionId, token, user) {
   if (!sessionId) return
   tokenStore.set(sessionId, { token, user, timestamp: Date.now() })
+  saveTokens(tokenStore)
 }
 
 export function clearStoredToken(sessionId) {
-  if (sessionId) tokenStore.delete(sessionId)
+  if (sessionId) {
+    tokenStore.delete(sessionId)
+    saveTokens(tokenStore)
+  }
 }
 
 function getAppUrl(req) {

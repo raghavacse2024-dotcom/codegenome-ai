@@ -45,6 +45,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
   const [copiedCli, setCopiedCli] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [patInput, setPatInput] = useState(getGitHubPat() || '')
+  const [forceShowPat, setForceShowPat] = useState(false)
 
   const pat = getGitHubPat()
   const isGoogleOrFallbackSession = Boolean(
@@ -52,6 +53,41 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
     (getSessionToken()?.startsWith('cg_google_') || getSessionToken()?.includes('google') || getSessionToken()?.includes('fallback'))
   )
   const hasWriteToken = Boolean(pat || (getSessionToken() && !isGoogleOrFallbackSession))
+
+  // Helper to open and prime the redirect window
+  function createRedirectWindow(): Window | null {
+    const w = window.open('about:blank', '_blank')
+    if (w) {
+      try {
+        w.document.title = "Redirecting to GitHub Pull Request..."
+        w.document.body.innerHTML = `
+          <div style="font-family:system-ui,-apple-system,sans-serif;background:#091220;color:#e8f1fb;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0;padding:24px;box-sizing:border-box;text-align:center;">
+            <div style="width:44px;height:44px;border:3px solid rgba(57,243,195,0.2);border-top-color:#39f3c3;border-radius:50%;animation:spin 0.9s linear infinite;margin-bottom:20px;"></div>
+            <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+            <h2 style="font-size:20px;font-weight:600;margin:0 0 10px 0;color:#39f3c3;">Pushing to GitHub & Opening Pull Request...</h2>
+            <p style="font-size:14px;color:#8cafd2;max-width:440px;margin:0 0 16px 0;line-height:1.5;">Forking repository, committing refactored files, and preparing the GitHub review interface.</p>
+            <p style="font-size:12px;color:#64748b;margin:0;">You will be automatically redirected to GitHub in a few seconds...</p>
+          </div>
+        `
+      } catch {}
+    }
+    return w
+  }
+
+  function navigateToPr(url: string, targetWindow: Window | null) {
+    if (targetWindow && !targetWindow.closed) {
+      try {
+        targetWindow.location.href = url
+        return
+      } catch {
+        try {
+          targetWindow.location.replace(url)
+          return
+        } catch {}
+      }
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
 
   // Close modal on Escape
   useEffect(() => {
@@ -74,11 +110,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
     setLoading(true)
     setError(null)
 
-    // Open blank window synchronously to prevent popup blocker, but don't inject any HTML loader
-    const prWindow = window.open('about:blank', '_blank')
-    if (prWindow) {
-      prWindow.document.title = "Redirecting to GitHub..."
-    }
+    const prWindow = createRedirectWindow()
 
     // Save PAT if entered in-form
     const cleanPat = patInput.trim()
@@ -100,11 +132,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
       })
       setResult(res)
       if (res.prUrl) {
-        if (prWindow) {
-          prWindow.location.href = res.prUrl
-        } else {
-          window.open(res.prUrl, '_blank', 'noopener,noreferrer')
-        }
+        navigateToPr(res.prUrl, prWindow)
       } else if (prWindow) {
         prWindow.close()
       }
@@ -112,6 +140,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
       if (prWindow) prWindow.close()
       const errMsg = err?.message || 'Failed to generate Pull Request.'
       setError(errMsg)
+      setForceShowPat(true)
       
       if (
         errMsg.toLowerCase().includes('session has expired') || 
@@ -125,7 +154,6 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
           localStorage.removeItem('codegenome_github_user')
         } catch {}
         
-        // Show auth modal to re-establish connection
         setTimeout(() => {
           setShowAuthModal(true)
         }, 500)
@@ -284,27 +312,44 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                   </div>
 
                   <div className="flex flex-col gap-2.5">
-                    {!hasWriteToken && (
-                      <div className="input-with-icon" style={{ position: 'relative' }}>
-                        <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
-                        <input
-                          type="password"
-                          placeholder="Paste your GitHub Personal Access Token (ghp_...)"
-                          value={patInput}
-                          onChange={(e) => setPatInput(e.target.value)}
-                          style={{
-                            width: '100%',
-                            padding: '10px 12px 10px 32px',
-                            background: 'rgba(0,0,0,0.5)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            borderRadius: '8px',
-                            color: '#ffffff',
-                            fontSize: '13px',
-                            outline: 'none',
-                            boxSizing: 'border-box'
-                          }}
-                        />
+                    {(!hasWriteToken || forceShowPat) ? (
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs text-slate-400 font-medium">
+                          GitHub Personal Access Token (PAT)
+                        </label>
+                        <div className="input-with-icon" style={{ position: 'relative' }}>
+                          <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
+                          <input
+                            type="password"
+                            placeholder="Paste your GitHub Personal Access Token (ghp_...)"
+                            value={patInput}
+                            onChange={(e) => setPatInput(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px 10px 32px',
+                              background: 'rgba(0,0,0,0.5)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              borderRadius: '8px',
+                              color: '#ffffff',
+                              fontSize: '13px',
+                              outline: 'none',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          Requires <code>repo</code> scope to fork and push commits to GitHub.
+                        </p>
                       </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setForceShowPat(true)}
+                        className="text-xs text-slate-400 hover:text-neon underline text-left cursor-pointer transition-colors py-0.5"
+                        style={{ background: 'none', border: 'none' }}
+                      >
+                        Using a different GitHub account or Personal Access Token (PAT)? Click here
+                      </button>
                     )}
                     
                     {error && (
@@ -320,16 +365,13 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                       onClick={async () => {
                         if (!hasWriteToken && !patInput.trim()) {
                           setError('Please paste a GitHub Personal Access Token first.');
+                          setForceShowPat(true);
                           return;
                         }
                         setLoading(true);
                         setError(null);
 
-                        // Open blank window synchronously to prevent popup blocker
-                        const prWindow = window.open('about:blank', '_blank');
-                        if (prWindow) {
-                          prWindow.document.title = "Redirecting to GitHub...";
-                        }
+                        const prWindow = createRedirectWindow();
 
                         const cleanPat = patInput.trim();
                         if (cleanPat) {
@@ -349,18 +391,15 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                           });
                           setResult(res);
                           if (res.prUrl) {
-                            if (prWindow) {
-                              prWindow.location.href = res.prUrl;
-                            } else {
-                              window.open(res.prUrl, '_blank', 'noopener,noreferrer');
-                            }
+                            navigateToPr(res.prUrl, prWindow);
                           } else if (prWindow) {
                             prWindow.close();
                           }
                         } catch (err: any) {
                           if (prWindow) prWindow.close();
                           const errMsg = err?.message || 'Failed to create real Pull Request.'
-                          setError(errMsg)
+                          setError(errMsg);
+                          setForceShowPat(true);
                           
                           if (
                             errMsg.toLowerCase().includes('session has expired') || 
@@ -368,12 +407,12 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                             errMsg.toLowerCase().includes('401')
                           ) {
                             try {
-                              localStorage.removeItem('codegenome_github_session')
-                              localStorage.removeItem('codegenome_github_pat')
-                              localStorage.removeItem('codegenome_github_user')
+                              localStorage.removeItem('codegenome_github_session');
+                              localStorage.removeItem('codegenome_github_pat');
+                              localStorage.removeItem('codegenome_github_user');
                             } catch {}
                             
-                            setTimeout(() => setShowAuthModal(true), 500)
+                            setTimeout(() => setShowAuthModal(true), 500);
                           }
                         } finally {
                           setLoading(false);

@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { initializeApp, getApps } from 'firebase/app'
-import { initializeFirestore } from 'firebase/firestore'
+import { getFirestore } from 'firebase/firestore'
 
 let dbInstance = null
 
@@ -19,17 +19,9 @@ export function getServerFirestore() {
     }
 
     const rawConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-    const app = getApps().length > 0 ? getApps()[0] : initializeApp({
-      projectId: rawConfig.projectId,
-      appId: rawConfig.appId,
-      apiKey: rawConfig.apiKey,
-      authDomain: rawConfig.authDomain,
-      storageBucket: rawConfig.storageBucket,
-    })
+    const app = getApps().length > 0 ? getApps()[0] : initializeApp(rawConfig)
 
-    dbInstance = initializeFirestore(app, {
-      experimentalForceLongPolling: true
-    }, rawConfig.firestoreDatabaseId)
+    dbInstance = getFirestore(app, rawConfig.firestoreDatabaseId)
 
     return dbInstance
   } catch (error) {

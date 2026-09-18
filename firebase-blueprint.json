@@ -1,5 +1,13 @@
 {
   "entities": {
+    "connectionTest": {
+      "title": "Connection Test Document",
+      "description": "Probe document for health checking Firestore connectivity.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" }
+      }
+    },
     "analysis": {
       "title": "Analysis Record",
       "description": "Persistent repository intelligence report containing multi-agent results, debt metrics, and refactor blueprints.",
@@ -29,6 +37,10 @@
     }
   },
   "firestore": {
+    "/test/{testId}": {
+      "schema": "connectionTest",
+      "description": "Connection probe used on application startup to verify database availability."
+    },
     "/analyses/{analysisId}": {
       "schema": "analysis",
       "description": "Global and user analyses persisted for durable access, history, and sharing."

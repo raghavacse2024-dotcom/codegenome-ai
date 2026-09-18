@@ -236,7 +236,7 @@ export async function createPullRequest({
         
         // Always fall back to returning the compare URL so the user is redirected to GitHub UI
         console.log('[PR Service] Returning compare URL due to Validation Failed')
-        const compareUrl = `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${headRef}`
+        const compareUrl = `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${headRef}?expand=1`
         return {
           success: true,
           mode: 'live',
