@@ -13,6 +13,7 @@ import { PersistentHistoryDrawer } from './components/PersistentHistoryDrawer'
 import { getCurrentUser, logoutUser, getSessionToken, setSessionToken, registerSession, getGitHubPat } from './services/apiService'
 import { auth } from './services/firebase'
 import { useTheme } from './hooks/useTheme'
+import { isPageReload } from './utils/navigation'
 import type { GitHubUser, Analysis } from './types'
 
 const demoUrl = 'https://github.com/raghavacse2024-dotcom/codegenome-ai'
@@ -27,34 +28,57 @@ export default function App() {
   useTheme()
   const [view, setView] = useState<'home' | 'cockpit'>(() => {
     try {
-      const saved = localStorage.getItem('codegenome_current_view')
-      if (saved === 'cockpit' || saved === 'home') return saved as 'home' | 'cockpit'
-      if (window.location.hash === '#cockpit' || window.location.search.includes('cockpit')) return 'cockpit'
+      localStorage.removeItem('codegenome_current_view')
     } catch {}
-    return 'cockpit' // Default to cockpit workspace so refresh always retains cockpit
+
+    try {
+      // ONLY if the current tab was refreshed (reload), preserve the same page
+      if (isPageReload()) {
+        const saved = sessionStorage.getItem('codegenome_tab_view')
+        if (saved === 'cockpit' || saved === 'home') {
+          return saved as 'home' | 'cockpit'
+        }
+      }
+    } catch {}
+
+    // When opened in a new page/tab or fresh navigation, always start from home page
+    try {
+      sessionStorage.setItem('codegenome_tab_view', 'home')
+    } catch {}
+    return 'home'
   })
+
   const [url, setUrl] = useState(() => {
     try {
-      return localStorage.getItem('codegenome_last_url') || ''
-    } catch {
-      return ''
-    }
+      if (isPageReload()) {
+        return sessionStorage.getItem('codegenome_tab_url') || ''
+      }
+    } catch {}
+    return ''
   })
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
     try {
-      localStorage.setItem('codegenome_current_view', view)
+      sessionStorage.setItem('codegenome_tab_view', view)
     } catch {}
   }, [view])
 
   useEffect(() => {
     if (url) {
       try {
-        localStorage.setItem('codegenome_last_url', url)
+        sessionStorage.setItem('codegenome_tab_url', url)
       } catch {}
     }
   }, [url])
+
+  // Clear stale hash when opening fresh on home page
+  useEffect(() => {
+    if (!isPageReload() && window.location.hash === '#cockpit') {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }, [])
+
   const [user, setUser] = useState<GitHubUser | null>(() => {
     try {
       const cached = localStorage.getItem('codegenome_github_user')
@@ -65,6 +89,16 @@ export default function App() {
   })
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const { run, results: analysis, loading, error, setLoadedAnalysis, streamEvents, streamStatus } = useAnalysis()
+
+  // Sync repo url if restored on refresh
+  useEffect(() => {
+    if (analysis && !url) {
+      const repoUrl = analysis.repo?.url || (analysis.repo?.owner && analysis.repo?.repository ? `https://github.com/${analysis.repo.owner}/${analysis.repo.repository}` : '')
+      if (repoUrl) {
+        setUrl(repoUrl)
+      }
+    }
+  }, [analysis, url])
   const currentEvents = useMemo(() => {
     if (loading && streamEvents.length > 0) {
       return streamEvents
@@ -248,7 +282,7 @@ export default function App() {
               <header className="topbar">
                 <div className="topbar-copy">
                   <p className="eyebrow"><LayoutDashboard size={12} style={{display: 'inline', marginRight: 4, verticalAlign: 'middle'}}/> Multi-agent telemetry</p>
-                  <h1 style={{ color: 'var(--text-main, #ffffff)', opacity: 1, fontWeight: 700 }}>Initialize repository intelligence network.</h1>
+                  <h1>Initialize repository intelligence network.</h1>
                 </div>
               </header>
 
@@ -269,7 +303,7 @@ export default function App() {
                         type="button" 
                         className="hint-auth-btn"
                         onClick={() => setAuthModalOpen(true)}
-                        style={{ background: 'none', border: 'none', color: 'var(--neon)', cursor: 'pointer', padding: 0, font: 'inherit', textDecoration: 'underline', fontSize: '11px', fontFamily: 'DM Mono, monospace' }}
+                        style={{ background: 'none', border: 'none', color: 'var(--cyan)', cursor: 'pointer', padding: 0, font: 'inherit', textDecoration: 'underline', fontSize: '11px', fontFamily: 'DM Mono, monospace' }}
                       >
                         SIGN IN FOR PRIVATE REPOS
                       </button>
@@ -318,10 +352,10 @@ export default function App() {
                 </form>
               </motion.section>
 
-              <div className="database-scans-section" style={{ marginTop: '24px', marginBottom: '24px', padding: '20px', background: 'var(--card-bg, rgba(20, 20, 30, 0.6))', borderRadius: '14px', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+              <div className="database-scans-section">
                 <div style={{ marginBottom: '12px' }}>
-                  <p className="eyebrow" style={{ fontSize: '11px', letterSpacing: '0.05em', color: 'var(--neon)', textTransform: 'uppercase', marginBottom: '4px' }}>PERSISTENT STORAGE</p>
-                  <h3 style={{ fontSize: '16px', fontWeight: '600', margin: 0 }}>Cloud Firestore Scans & Database Records</h3>
+                  <p className="eyebrow" style={{ fontSize: '11px', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px' }}>PERSISTENT STORAGE</p>
+                  <h3 className="database-scans-title">Cloud Firestore Scans & Database Records</h3>
                 </div>
                 <PersistentHistoryDrawer 
                   currentAnalysisId={analysis?.analysisId}

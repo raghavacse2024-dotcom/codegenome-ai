@@ -50,7 +50,7 @@ export function RepoSelector({ onSelectRepo, currentUrl }: RepoSelectorProps) {
           className="repo-selector-toggle-btn"
           onClick={() => setIsOpen(!isOpen)}
         >
-          <FolderGit2 className="w-3.5 h-3.5 text-[#7df3c3]" />
+          <FolderGit2 className="w-3.5 h-3.5 repo-folder-icon" />
           <span>{isOpen ? 'Hide My Repositories' : 'Select From Your GitHub Repositories (Private & Public)'}</span>
           <span className="repo-count-pill">{repos.length}</span>
         </button>
@@ -67,7 +67,7 @@ export function RepoSelector({ onSelectRepo, currentUrl }: RepoSelectorProps) {
           >
             <div className="repo-selector-header">
               <div className="repo-search-box">
-                <Search className="w-3.5 h-3.5 text-[#8cafd2]" />
+                <Search className="w-3.5 h-3.5 repo-search-icon" />
                 <input 
                   type="text" 
                   className="repo-search-input"

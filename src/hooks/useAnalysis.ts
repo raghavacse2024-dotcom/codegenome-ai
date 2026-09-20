@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { Analysis, AgentEvent } from '../types'
 import { analyzeRepositoryStream } from '../services/apiService'
+import { isPageReload } from '../utils/navigation'
 
 /**
  * Manages the repository analysis lifecycle for the dashboard with real-time SSE streaming.
@@ -8,6 +9,11 @@ import { analyzeRepositoryStream } from '../services/apiService'
 export function useAnalysis() {
   const [results, setResults] = useState<Analysis | null>(() => {
     try {
+      // Only retain active analysis when the user refreshes an existing open tab
+      if (!isPageReload()) {
+        sessionStorage.removeItem('codegenome_active_analysis')
+        return null
+      }
       const cached = sessionStorage.getItem('codegenome_active_analysis')
       return cached ? JSON.parse(cached) : null
     } catch {
@@ -18,6 +24,9 @@ export function useAnalysis() {
   const [error, setError] = useState('')
   const [streamEvents, setStreamEvents] = useState<AgentEvent[]>(() => {
     try {
+      if (!isPageReload()) {
+        return []
+      }
       const cached = sessionStorage.getItem('codegenome_active_analysis')
       if (cached) {
         const parsed = JSON.parse(cached)

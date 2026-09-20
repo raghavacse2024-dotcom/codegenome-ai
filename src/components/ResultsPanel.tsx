@@ -28,7 +28,7 @@ function ScaffoldCard({ file, index }: { file: Scaffold; index: number }) {
     <motion.article 
       className={`code-card reveal${copied ? ' is-copied' : ''}`} 
       style={{ '--i': index } as CSSProperties}
-      whileHover={{ y: -3, boxShadow: '0 24px 50px -30px rgba(0, 0, 0, .9)', borderColor: 'rgba(125, 243, 195, .35)' }}
+      whileHover={{ y: -3 }}
     >
       <div className="code-head">
         <span className="code-path"><FileCode size={12} style={{display: 'inline', marginRight: 6, verticalAlign: 'middle'}}/>{file.path}</span>
@@ -178,7 +178,7 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
               className="hotspot-row hotspot-row--interactive" 
               key={hotspot.path} 
               style={{ '--i': index } as CSSProperties}
-              whileHover={{ x: 3, backgroundColor: 'rgba(125, 243, 195, .06)' }}
+              whileHover={{ x: 3 }}
               onClick={() => setSelectedHotspot(hotspot)}
               role="button"
               tabIndex={0}
@@ -229,7 +229,7 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
           {refactor.data.steps.map((step, idx) => (
             <motion.li 
               key={step}
-              whileHover={{ x: 3, backgroundColor: 'rgba(15, 32, 48, .8)', borderColor: 'rgba(125, 243, 195, .3)' }}
+              whileHover={{ x: 3 }}
             >
               {step}
             </motion.li>
