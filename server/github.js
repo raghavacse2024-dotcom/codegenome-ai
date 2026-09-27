@@ -6,6 +6,33 @@ import { isSensitiveFile } from './services/secretRedactor.js'
 const MAX_FILE_BYTES = 45_000
 const MAX_TOTAL_ANALYZED_BYTES = 400_000
 
+export function isRepositoryPolicyFile(filePath) {
+  if (!filePath || typeof filePath !== 'string') return false
+  const lower = filePath.toLowerCase().replace(/^\/+/, '')
+  const baseName = lower.split('/').pop() || ''
+
+  // 1. Direct root or nested policy / agents / contributing files
+  if (/^(?:agents|contributing|copilot[-_]instructions|code_of_conduct|security|pull_request_template|pr_template)(?:\.(?:md|rst|txt))?$/i.test(baseName)) {
+    return true
+  }
+
+  // 2. Any file in .github/ matching contribution / policy / instructions / guidelines
+  if (lower.startsWith('.github/') || lower.includes('/.github/')) {
+    if (/(?:contribut|policy|guideline|agent|copilot|instruction|pr_template|pull_request_template|dependabot)/i.test(lower)) {
+      return true
+    }
+  }
+
+  // 3. Documentation contribution guides (e.g. docs/contributing.md)
+  if (lower.startsWith('docs/') || lower.includes('/docs/')) {
+    if (/(?:contribut|policy|agent|guideline)/i.test(baseName)) {
+      return true
+    }
+  }
+
+  return false
+}
+
 const getLimitFiles = (customToken) => {
   return getCleanToken(customToken) ? 100 : 25
 }
@@ -57,17 +84,36 @@ function computeSamplingMetadata({
   analyzedFiles,
   totalFiles = null,
   limit = 25,
+  policyFilesDiscovered = [],
+  policyFilesInspected = [],
+  policyInspectionComplete = false,
+  samplingStatus = null,
 }) {
   const analyzedFileCount = analyzedFiles.length
   const repositoryFileCount = totalFiles !== null ? totalFiles : analyzedFileCount
   const samplingUsed = repositoryFileCount > analyzedFileCount
   const skippedFileCount = Math.max(0, repositoryFileCount - analyzedFileCount)
   const totalAnalyzedBytes = analyzedFiles.reduce((acc, f) => acc + (f.size || f.content?.length || 0), 0)
-  const coverageRatio = repositoryFileCount > 0 ? (analyzedFileCount / repositoryFileCount) : 1
-  const analysisCoverage = samplingUsed ? `${Math.min(99, Math.round(coverageRatio * 100))}%` : '100%'
-  const samplingNotice = samplingUsed
+
+  let analysisCoverage = 'sampled'
+  let status = samplingStatus || (samplingUsed ? 'sampled' : 'full')
+  if (repositoryFileCount === 0 || analyzedFileCount === 0) {
+    status = 'unavailable'
+    analysisCoverage = '0%'
+  } else if (!samplingUsed && repositoryFileCount === analyzedFileCount) {
+    status = 'full'
+    analysisCoverage = '100%'
+  } else if (repositoryFileCount > 0) {
+    status = 'sampled'
+    const ratio = Math.round((analyzedFileCount / repositoryFileCount) * 100)
+    analysisCoverage = `${Math.min(99, Math.max(1, ratio))}%`
+  }
+
+  const samplingNotice = status === 'full'
+    ? `Complete analysis of all ${analyzedFileCount} detected source files in repository.`
+    : status === 'sampled'
     ? `Analysis is based on a sampled subset of repository files (${analyzedFileCount} of ${repositoryFileCount} files analyzed, ${analysisCoverage} coverage).`
-    : `Complete analysis of all ${analyzedFileCount} detected source files in repository.`
+    : `Repository files were unavailable from GitHub; using resilient demo-safe analysis.`
 
   return {
     analyzedFileCount,
@@ -77,7 +123,11 @@ function computeSamplingMetadata({
     skippedFileCount,
     totalAnalyzedBytes,
     analysisCoverage,
+    samplingStatus: status,
     samplingNotice,
+    policyFilesDiscovered,
+    policyFilesInspected,
+    policyInspectionComplete,
   }
 }
 
@@ -87,13 +137,18 @@ function fallbackRepository(owner, repository, reason) {
     analyzedFiles: demo.files,
     totalFiles: demo.files.length,
     limit: 25,
+    policyFilesDiscovered: [],
+    policyFilesInspected: [],
+    policyInspectionComplete: false,
+    samplingStatus: 'unavailable',
   })
-  metadata.samplingNotice = 'Analysis is based on a sampled subset of repository files.'
-  metadata.analysisCoverage = 'sampled'
+  metadata.samplingNotice = 'Repository files were unavailable from GitHub; using resilient demo-safe analysis.'
+  metadata.analysisCoverage = 'unavailable'
   return {
     ...demo,
     source: 'demo',
     mode: 'demo',
+    policyFiles: [],
     metadata,
   }
 }
@@ -133,6 +188,7 @@ async function fetchRepositoryArchive(owner, repository, customToken) {
       }
       const zip = await JSZip.loadAsync(buffer)
       const files = []
+      const policyFiles = []
       let totalFiles = 0
       let totalBytesAccumulated = 0
 
@@ -145,6 +201,16 @@ async function fetchRepositoryArchive(owner, repository, customToken) {
 
         // Exclude sensitive files (.env, keys, credentials)
         if (isSensitiveFile(path)) continue
+
+        // 1. Policy files are captured independently of code limits
+        if (isRepositoryPolicyFile(path)) {
+          const policyContent = (await entry.async('string')).slice(0, MAX_FILE_BYTES)
+          if (policyContent) {
+            policyFiles.push({ path, size: policyContent.length, content: policyContent })
+          }
+          continue
+        }
+
         if (!CODE_EXTENSIONS.test(path)) continue
 
         if (files.length < limit && totalBytesAccumulated < MAX_TOTAL_ANALYZED_BYTES) {
@@ -160,10 +226,15 @@ async function fetchRepositoryArchive(owner, repository, customToken) {
           analyzedFiles: files,
           totalFiles,
           limit,
+          policyFilesDiscovered: policyFiles.map((p) => p.path),
+          policyFilesInspected: policyFiles.map((p) => p.path),
+          policyInspectionComplete: true,
+          samplingStatus: totalFiles > files.length ? 'sampled' : 'full',
         })
         return {
           repo: { owner, repository, url: `https://github.com/${owner}/${repository}`, description: '', stars: 0, defaultBranch: branch },
           files,
+          policyFiles,
           structure: buildStructure(files),
           truncated: totalFiles > files.length,
           metadata,
@@ -203,7 +274,31 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
     const allTreeBlobs = (tree.tree || []).filter((item) => item.type === 'blob')
     const totalFiles = allTreeBlobs.length
 
-    // Filter valid candidate files, excluding sensitive credentials and non-code
+    // 1. Separate Policy & Configuration Files Discovery (DOES NOT CONSUME SOURCE CODE SAMPLING BUDGET)
+    const policyBlobs = allTreeBlobs.filter((item) => isRepositoryPolicyFile(item.path))
+    const policyFilesDiscovered = policyBlobs.map((item) => item.path)
+
+    const rawPolicyFiles = await Promise.all(policyBlobs.map(async (item) => {
+      try {
+        if (tokenForReq || metadata.private) {
+          const blobRes = await githubFetch(`/repos/${owner}/${repository}/git/blobs/${item.sha}`, tokenForReq)
+          if (blobRes?.content) {
+            const decoded = Buffer.from(blobRes.content, 'base64').toString('utf-8').slice(0, MAX_FILE_BYTES)
+            return { path: item.path, size: item.size, content: decoded }
+          }
+        }
+        const raw = await fetch(`https://raw.githubusercontent.com/${owner}/${repository}/${branch}/${item.path}`, { signal: AbortSignal.timeout(4_000) })
+        const text = raw.ok ? (await raw.text()).slice(0, MAX_FILE_BYTES) : ''
+        return { path: item.path, size: item.size, content: text }
+      } catch {
+        return { path: item.path, size: item.size, content: '' }
+      }
+    }))
+    const validPolicyFiles = rawPolicyFiles.filter((f) => f.content)
+    const policyFilesInspected = validPolicyFiles.map((f) => f.path)
+    const policyInspectionComplete = true
+
+    // 2. Filter valid candidate code files for AST analysis
     const candidates = allTreeBlobs
       .filter((item) => !isSensitiveFile(item.path) && CODE_EXTENSIONS.test(item.path) && item.size <= MAX_FILE_BYTES)
       .slice(0, limit)
@@ -236,6 +331,10 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
       analyzedFiles: sampledFiles,
       totalFiles,
       limit,
+      policyFilesDiscovered,
+      policyFilesInspected,
+      policyInspectionComplete,
+      samplingStatus: totalFiles > sampledFiles.length ? 'sampled' : 'full',
     })
 
     const result = { 
@@ -249,6 +348,7 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
         private: Boolean(metadata.private) 
       }, 
       files: sampledFiles, 
+      policyFiles: validPolicyFiles,
       structure: buildStructure(sampledFiles), 
       truncated: totalFiles > sampledFiles.length,
       metadata: samplingMeta,
