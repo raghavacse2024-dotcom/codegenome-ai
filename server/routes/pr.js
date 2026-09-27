@@ -2,7 +2,9 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { getAnalysis } from '../services/analysisStore.js'
 import { createPullRequest } from '../services/prService.js'
-import { getStoredToken, getStoredUser } from './auth.js'
+import { validateRefactor } from '../services/refactorValidator.js'
+import { validatePrGuardrails } from '../services/prGuardrails.js'
+import { resolveAuthenticatedUser } from '../services/authResolver.js'
 
 export const prRouter = Router()
 
@@ -12,6 +14,48 @@ const CreatePrSchema = z.object({
   branch: z.string().optional(),
   body: z.string().optional(),
   baseBranch: z.string().optional(),
+  confirmedHighRisk: z.boolean().optional(),
+})
+
+/**
+ * Validates a refactor package in sandbox without pushing changes.
+ */
+prRouter.post('/pr/validate', async (req, res, next) => {
+  try {
+    const { analysisId } = z.object({ analysisId: z.string().min(1) }).parse(req.body)
+    const analysis = await getAnalysis(analysisId)
+    if (!analysis) {
+      return res.status(404).json({ error: `Analysis with ID '${analysisId}' not found.` })
+    }
+
+    const refactorData = analysis.results?.refactor?.data || {}
+    const scaffolds = refactorData.scaffolds || []
+    const refactoredTarget = refactorData.refactoredTarget
+    const targetPath = refactorData.target
+
+    const filesToValidate = [...scaffolds]
+    if (targetPath && refactoredTarget && !filesToValidate.some((f) => f.path === targetPath)) {
+      filesToValidate.push({ path: targetPath, content: refactoredTarget })
+    }
+
+    const guardrails = validatePrGuardrails({
+      files: filesToValidate,
+      patch: refactorData.diff?.rawPatch || '',
+    })
+
+    const validation = await validateRefactor({
+      files: filesToValidate,
+      targetPath,
+      refactoredTarget,
+    })
+
+    res.json({
+      guardrails,
+      ...validation,
+    })
+  } catch (error) {
+    next(error)
+  }
 })
 
 /**
@@ -19,7 +63,7 @@ const CreatePrSchema = z.object({
  */
 prRouter.post('/pr/create', async (req, res, next) => {
   try {
-    const { analysisId, title, branch, body, baseBranch } = CreatePrSchema.parse(req.body)
+    const { analysisId, title, branch, body, baseBranch, confirmedHighRisk } = CreatePrSchema.parse(req.body)
 
     const analysis = await getAnalysis(analysisId)
     if (!analysis) {
@@ -31,21 +75,12 @@ prRouter.post('/pr/create', async (req, res, next) => {
       return res.status(400).json({ error: 'Analysis record does not contain valid repository details.' })
     }
 
-    // Resolve user auth token & user profile
-    let token = null
-    let user = null
-    const authHeader = req.headers.authorization
-    const customPat = req.headers['x-github-token']
+    // Resolve user auth token & user profile strictly
+    const authUser = resolveAuthenticatedUser(req)
+    let token = authUser?.token || null
+    let user = authUser?.user || null
 
-    if (authHeader?.startsWith('Bearer ')) {
-      const raw = authHeader.slice(7).trim()
-      if (raw.startsWith('cg_')) {
-        token = getStoredToken(raw)
-        user = getStoredUser(raw)
-      } else {
-        token = raw
-      }
-    }
+    const customPat = req.headers['x-github-token']
     if (customPat && typeof customPat === 'string' && customPat.trim().length > 5) {
       token = customPat.trim()
     }
@@ -61,7 +96,6 @@ prRouter.post('/pr/create', async (req, res, next) => {
     // Collect files to commit: new scaffolds + refactored target if applicable
     const filesToCommit = [...scaffolds]
     if (targetPath && refactoredTarget) {
-      // Check if not already in scaffolds
       if (!filesToCommit.some((f) => f.path === targetPath)) {
         filesToCommit.push({
           path: targetPath,
@@ -70,7 +104,7 @@ prRouter.post('/pr/create', async (req, res, next) => {
       }
     }
 
-    filesToCommit.forEach(f => {
+    filesToCommit.forEach((f) => {
       if (f.path.startsWith('/')) {
         f.path = f.path.substring(1)
       }
@@ -93,7 +127,14 @@ prRouter.post('/pr/create', async (req, res, next) => {
       patch: rawPatch,
       token,
       user,
+      targetPath,
+      refactoredTarget,
+      confirmedHighRisk: Boolean(confirmedHighRisk),
     })
+
+    if (!result.success) {
+      return res.status(400).json(result)
+    }
 
     res.json(result)
   } catch (error) {

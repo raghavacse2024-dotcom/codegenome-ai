@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app'
-import { getFirestore, doc, getDocFromServer, collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
+import { getFirestore, doc, getDocFromServer, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore'
 import { getAuth, GoogleAuthProvider, GithubAuthProvider, signInWithPopup, signOut } from 'firebase/auth'
 import config from '../../firebase-applet-config.json'
 import type { Analysis } from '../types'
@@ -80,13 +80,23 @@ export async function testFirestoreConnection() {
 }
 
 /**
- * Fetches recent analyses directly from persistent Firestore.
+ * Fetches recent analyses directly from persistent Firestore for authenticated owner.
  */
 export async function getRecentAnalysesFromFirestore(maxCount = 10): Promise<Analysis[]> {
+  const currentUser = auth.currentUser
+  if (!currentUser?.uid) {
+    return []
+  }
+
   const pathForAnalyses = 'analyses'
   try {
     const colRef = collection(db, pathForAnalyses)
-    const q = query(colRef, orderBy('createdAt', 'desc'), limit(maxCount))
+    const q = query(
+      colRef,
+      where('userId', '==', currentUser.uid),
+      orderBy('createdAt', 'desc'),
+      limit(maxCount)
+    )
     const snapshot = await getDocs(q)
     const list: Analysis[] = []
     snapshot.forEach((docSnap) => {

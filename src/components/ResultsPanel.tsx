@@ -86,6 +86,45 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
     >
       <DemoModeBadge isDemo={analysis.isDemo} />
 
+      {/* Transparent Repository Sampling Notice */}
+      <div 
+        className="sampling-transparency-banner"
+        style={{
+          margin: '10px 0 16px 0',
+          padding: '10px 14px',
+          borderRadius: '8px',
+          background: 'rgba(34, 197, 94, 0.07)',
+          border: '1px solid rgba(34, 197, 94, 0.22)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '12px',
+          color: '#d1fae5',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Activity size={14} style={{ color: 'var(--neon)' }} />
+          <span>
+            <strong>Sample-based repository analysis:</strong>{' '}
+            {analysis.metadata?.samplingNotice || `Analysis based on ${architecture.data.structure.sampledFileCount} sampled source files.`}
+          </span>
+        </div>
+        {analysis.metadata?.analysisCoverage && (
+          <span style={{
+            fontSize: '11px',
+            background: 'rgba(34, 197, 94, 0.2)',
+            padding: '2px 8px',
+            borderRadius: '12px',
+            color: '#4ade80',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+            marginLeft: '8px',
+          }}>
+            {analysis.metadata.analysisCoverage} Coverage
+          </span>
+        )}
+      </div>
+
       <section className="score-row">
         <motion.article className="score-card" variants={panelVariant}>
           <span>Debt Score</span>

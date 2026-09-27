@@ -25,6 +25,16 @@ export async function analyzeRepository(repositoryUrl, token = null, onProgress 
     result.results.refactor.data.scaffolds = generated.files
     result.results.refactor.data.refactoredTarget = generated.refactoredTargetContent
     result.results.refactor.data.diff = generated.diff
+    result.metadata = repository.metadata || {
+      analyzedFileCount: repository.files?.length || 0,
+      repositoryFileCount: repository.files?.length || 0,
+      samplingUsed: false,
+      samplingLimit: 25,
+      skippedFileCount: 0,
+      totalAnalyzedBytes: (repository.files || []).reduce((acc, f) => acc + (f.size || f.content?.length || 0), 0),
+      analysisCoverage: '100%',
+      samplingNotice: `Analysis based on ${repository.files?.length || 0} source files.`
+    }
     return result
   }, 60_000)
 

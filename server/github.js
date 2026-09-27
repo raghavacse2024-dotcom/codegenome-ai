@@ -1,12 +1,34 @@
 import JSZip from 'jszip'
 import { parseRepositoryUrl } from './contracts.js'
 import { createDemoRepository } from './services/demoCacheService.js'
+import { isSensitiveFile } from './services/secretRedactor.js'
+
 const MAX_FILE_BYTES = 45_000
+const MAX_TOTAL_ANALYZED_BYTES = 400_000
+
 const getLimitFiles = (customToken) => {
   return getCleanToken(customToken) ? 100 : 25
 }
+
 const CODE_EXTENSIONS = /\.(?:js|jsx|ts|tsx|py|java|go|rb|php|cs|rs|vue|svelte|css|html|sql)$/i
-const LANGUAGE_BY_EXTENSION = { js: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript', py: 'Python', java: 'Java', go: 'Go', rb: 'Ruby', php: 'PHP', cs: 'C#', rs: 'Rust', vue: 'Vue', svelte: 'Svelte', css: 'CSS', html: 'HTML', sql: 'SQL' }
+const LANGUAGE_BY_EXTENSION = {
+  js: 'JavaScript',
+  jsx: 'JavaScript',
+  ts: 'TypeScript',
+  tsx: 'TypeScript',
+  py: 'Python',
+  java: 'Java',
+  go: 'Go',
+  rb: 'Ruby',
+  php: 'PHP',
+  cs: 'C#',
+  rs: 'Rust',
+  vue: 'Vue',
+  svelte: 'Svelte',
+  css: 'CSS',
+  html: 'HTML',
+  sql: 'SQL',
+}
 
 const repositoryCache = new Map()
 const REPO_CACHE_TTL = 1000 * 60 * 10 // 10 minutes
@@ -27,12 +49,49 @@ const headers = (customToken) => {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'CodeGenomeAI-App/1.0 (+https://github.com/raghavacse2024-dotcom/codegenome-ai)',
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
+function computeSamplingMetadata({
+  analyzedFiles,
+  totalFiles = null,
+  limit = 25,
+}) {
+  const analyzedFileCount = analyzedFiles.length
+  const repositoryFileCount = totalFiles !== null ? totalFiles : analyzedFileCount
+  const samplingUsed = repositoryFileCount > analyzedFileCount
+  const skippedFileCount = Math.max(0, repositoryFileCount - analyzedFileCount)
+  const totalAnalyzedBytes = analyzedFiles.reduce((acc, f) => acc + (f.size || f.content?.length || 0), 0)
+  const coverageRatio = repositoryFileCount > 0 ? (analyzedFileCount / repositoryFileCount) : 1
+  const analysisCoverage = `${Math.min(100, Math.round(coverageRatio * 100))}%`
+  const samplingNotice = samplingUsed
+    ? `Analysis based on ${analyzedFileCount} sampled source files (${analysisCoverage} coverage of ${repositoryFileCount} files in repository).`
+    : `Complete analysis of all ${analyzedFileCount} detected source files in repository.`
+
+  return {
+    analyzedFileCount,
+    repositoryFileCount,
+    samplingUsed,
+    samplingLimit: limit,
+    skippedFileCount,
+    totalAnalyzedBytes,
+    analysisCoverage,
+    samplingNotice,
   }
 }
 
 function fallbackRepository(owner, repository, reason) {
-  return createDemoRepository(owner, repository, reason, buildStructure)
+  const demo = createDemoRepository(owner, repository, reason, buildStructure)
+  const metadata = computeSamplingMetadata({
+    analyzedFiles: demo.files,
+    totalFiles: demo.files.length,
+    limit: 25,
+  })
+  return {
+    ...demo,
+    metadata,
+  }
 }
 
 async function githubFetch(path, customToken) {
@@ -56,10 +115,9 @@ async function fetchRepositoryArchive(owner, repository, customToken) {
     try {
       const response = await fetch(`https://api.github.com/repos/${owner}/${repository}/zipball/${branch}`, {
         headers: authHeaders,
-        signal: AbortSignal.timeout(8_000)
+        signal: AbortSignal.timeout(8_000),
       })
       if (!response.ok) {
-        // Fallback to direct codeload if public
         const publicRes = await fetch(`https://codeload.github.com/${owner}/${repository}/zip/refs/heads/${branch}`, { signal: AbortSignal.timeout(6_000) })
         if (!publicRes.ok) {
           lastFailure = new Error(`GitHub archive request returned ${response.status}.`)
@@ -71,23 +129,40 @@ async function fetchRepositoryArchive(owner, repository, customToken) {
       }
       const zip = await JSZip.loadAsync(buffer)
       const files = []
+      let totalFiles = 0
+      let totalBytesAccumulated = 0
+
       for (const entry of Object.values(zip.files)) {
         if (entry.dir) continue
+        totalFiles++
         const parts = entry.name.split('/')
         if (parts.length < 2) continue
         const path = parts.slice(1).join('/')
+
+        // Exclude sensitive files (.env, keys, credentials)
+        if (isSensitiveFile(path)) continue
         if (!CODE_EXTENSIONS.test(path)) continue
-        const content = (await entry.async('string')).slice(0, MAX_FILE_BYTES)
-        if (!content) continue
-        files.push({ path, size: content.length, content })
-        if (files.length >= limit) break
+
+        if (files.length < limit && totalBytesAccumulated < MAX_TOTAL_ANALYZED_BYTES) {
+          const content = (await entry.async('string')).slice(0, MAX_FILE_BYTES)
+          if (!content) continue
+          files.push({ path, size: content.length, content })
+          totalBytesAccumulated += content.length
+        }
       }
+
       if (files.length) {
+        const metadata = computeSamplingMetadata({
+          analyzedFiles: files,
+          totalFiles,
+          limit,
+        })
         return {
           repo: { owner, repository, url: `https://github.com/${owner}/${repository}`, description: '', stars: 0, defaultBranch: branch },
           files,
           structure: buildStructure(files),
-          truncated: files.length >= limit,
+          truncated: totalFiles > files.length,
+          metadata,
         }
       }
       lastFailure = new Error(`GitHub archive for ${branch} did not contain supported source files.`)
@@ -118,30 +193,61 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
     const metadata = await githubFetch(`/repos/${owner}/${repository}`, tokenForReq)
     const branch = metadata.default_branch || 'main'
     const tree = await githubFetch(`/repos/${owner}/${repository}/git/trees/${encodeURIComponent(branch)}?recursive=1`, tokenForReq)
-    const candidates = (tree.tree || []).filter((item) => item.type === 'blob' && CODE_EXTENSIONS.test(item.path) && item.size <= MAX_FILE_BYTES).slice(0, limit)
+    
+    const allTreeBlobs = (tree.tree || []).filter((item) => item.type === 'blob')
+    const totalFiles = allTreeBlobs.length
+
+    // Filter valid candidate files, excluding sensitive credentials and non-code
+    const candidates = allTreeBlobs
+      .filter((item) => !isSensitiveFile(item.path) && CODE_EXTENSIONS.test(item.path) && item.size <= MAX_FILE_BYTES)
+      .slice(0, limit)
+
+    let totalBytesAccumulated = 0
     const files = await Promise.all(candidates.map(async (item) => {
       try {
-        // If private repository, fetch blob via GitHub API with token
+        if (totalBytesAccumulated >= MAX_TOTAL_ANALYZED_BYTES) {
+          return { path: item.path, size: item.size, content: '' }
+        }
         if (tokenForReq || metadata.private) {
           const blobRes = await githubFetch(`/repos/${owner}/${repository}/git/blobs/${item.sha}`, tokenForReq)
           if (blobRes?.content) {
             const decoded = Buffer.from(blobRes.content, 'base64').toString('utf-8').slice(0, MAX_FILE_BYTES)
+            totalBytesAccumulated += decoded.length
             return { path: item.path, size: item.size, content: decoded }
           }
         }
         const raw = await fetch(`https://raw.githubusercontent.com/${owner}/${repository}/${branch}/${item.path}`, { signal: AbortSignal.timeout(4_000) })
-        return { path: item.path, size: item.size, content: raw.ok ? (await raw.text()).slice(0, MAX_FILE_BYTES) : '' }
+        const text = raw.ok ? (await raw.text()).slice(0, MAX_FILE_BYTES) : ''
+        totalBytesAccumulated += text.length
+        return { path: item.path, size: item.size, content: text }
       } catch {
         return { path: item.path, size: item.size, content: '' }
       }
     }))
+
     const sampledFiles = files.filter((file) => file.content)
+    const samplingMeta = computeSamplingMetadata({
+      analyzedFiles: sampledFiles,
+      totalFiles,
+      limit,
+    })
+
     const result = { 
-      repo: { owner, repository, url, description: metadata.description || '', stars: metadata.stargazers_count || 0, defaultBranch: branch, private: Boolean(metadata.private) }, 
+      repo: { 
+        owner, 
+        repository, 
+        url, 
+        description: metadata.description || '', 
+        stars: metadata.stargazers_count || 0, 
+        defaultBranch: branch, 
+        private: Boolean(metadata.private) 
+      }, 
       files: sampledFiles, 
       structure: buildStructure(sampledFiles), 
-      truncated: (tree.tree || []).length > limit 
+      truncated: totalFiles > sampledFiles.length,
+      metadata: samplingMeta,
     }
+
     if (!isTesting) {
       repositoryCache.set(cacheKey, { timestamp: Date.now(), data: result })
     }

@@ -6,28 +6,48 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
     // Helper function for analysis validation
     function isValidAnalysis(data) {
       return data.analysisId is string &&
              data.analysisId.size() > 0 &&
              data.analysisId.size() <= 128 &&
              data.createdAt is string &&
+             data.createdAt.size() <= 64 &&
+             data.userId is string &&
+             data.userId.size() > 0 &&
+             data.userId.size() <= 128 &&
+             data.userId == request.auth.uid &&
              data.repo is map &&
              data.repo.owner is string &&
              data.repo.repository is string;
     }
 
     match /analyses/{analysisId} {
-      // Anyone can read saved analyses
-      allow read: if true;
-      
-      // Allow create if analysisId matches and required fields are valid
-      allow create: if request.resource.data.analysisId == analysisId &&
+      // Security: Only the authenticated owner can read their analyses.
+      // Blanket reads (allow read: if true) are strictly prohibited.
+      // Both single-document get and collection list queries enforce resource.data.userId == request.auth.uid.
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      // Allow create only if user is authenticated, the document ID matches analysisId,
+      // and data.userId matches the authenticated caller's uid (no user spoofing).
+      allow create: if isSignedIn() &&
+                       request.resource.data.analysisId == analysisId &&
                        isValidAnalysis(request.resource.data);
 
       // Analyses are immutable once generated (read-only snapshots)
       allow update: if false;
-      allow delete: if false;
+
+      // Owner can delete their own analyses (e.g. clear history)
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
     // Default deny for all other paths

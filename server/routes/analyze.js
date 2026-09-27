@@ -1,25 +1,20 @@
 import { Router } from 'express'
 import { AnalyzeRequestSchema } from '../contracts.js'
 import { analyzeRepository } from '../services/analysisEngine.js'
-import { saveAnalysis } from '../services/analysisStore.js'
-import { getStoredToken, getStoredUser } from './auth.js'
+import { saveAnalysis, getAnalysis, getRecentAnalyses, clearUserAnalyses } from '../services/analysisStore.js'
+import { resolveAuthenticatedUser } from '../services/authResolver.js'
+import { analyzeRateLimiter } from '../middleware/rateLimiter.js'
 
 export const analyzeRouter = Router()
 
-analyzeRouter.post('/analyze', async (request, response, next) => {
+analyzeRouter.post('/analyze', analyzeRateLimiter, async (request, response, next) => {
   try {
     const { repositoryUrl } = AnalyzeRequestSchema.parse(request.body)
     
-    // Resolve user token from Authorization header (session ID or direct token)
-    let userToken = null
-    let userId = null
-    const authHeader = request.headers.authorization
-    if (authHeader?.startsWith('Bearer ')) {
-      const raw = authHeader.slice(7).trim()
-      const storedUser = getStoredUser(raw)
-      userId = storedUser?.login || (raw.startsWith('cg_') ? raw : null)
-      userToken = raw.startsWith('cg_') ? (getStoredToken(raw) || raw) : raw
-    }
+    // Resolve user token from Authorization header or active session
+    const authUser = resolveAuthenticatedUser(request)
+    const userId = authUser?.userId || null
+    const userToken = authUser?.token || null
 
     const analyzedData = await analyzeRepository(repositoryUrl, userToken)
     const savedRecord = await saveAnalysis(analyzedData, userId)
@@ -61,19 +56,10 @@ async function handleAnalyzeStream(request, response, next) {
 
     const { repositoryUrl } = AnalyzeRequestSchema.parse({ repositoryUrl: rawUrl })
 
-    // Resolve user token from Authorization header or query parameter
-    let userToken = null
-    let userId = null
-    const authHeader = request.headers.authorization
-    const tokenCandidate = authHeader?.startsWith('Bearer ') 
-      ? authHeader.slice(7).trim() 
-      : (typeof request.query.token === 'string' ? request.query.token.trim() : null)
-
-    if (tokenCandidate) {
-      const storedUser = getStoredUser(tokenCandidate)
-      userId = storedUser?.login || (tokenCandidate.startsWith('cg_') ? tokenCandidate : null)
-      userToken = tokenCandidate.startsWith('cg_') ? (getStoredToken(tokenCandidate) || tokenCandidate) : tokenCandidate
-    }
+    // Resolve user from Authorization header or query token
+    const authUser = resolveAuthenticatedUser(request)
+    const userId = authUser?.userId || null
+    const userToken = authUser?.token || null
 
     sendEvent('status', { 
       phase: 'starting', 
@@ -98,77 +84,78 @@ async function handleAnalyzeStream(request, response, next) {
   }
 }
 
-analyzeRouter.get('/analyze/stream', handleAnalyzeStream)
-analyzeRouter.post('/analyze/stream', handleAnalyzeStream)
+analyzeRouter.get('/analyze/stream', analyzeRateLimiter, handleAnalyzeStream)
+analyzeRouter.post('/analyze/stream', analyzeRateLimiter, handleAnalyzeStream)
 
 // Persistent database endpoint: list recent repository scans for authenticated user only
 analyzeRouter.get('/history', async (request, response, next) => {
   try {
-    const { getRecentAnalyses } = await import('../services/analysisStore.js')
-
-    let userId = null
-    const authHeader = request.headers.authorization
-    const tokenCandidate = authHeader?.startsWith('Bearer ') 
-      ? authHeader.slice(7).trim() 
-      : (typeof request.query.token === 'string' ? request.query.token.trim() : null)
-
-    if (tokenCandidate) {
-      const storedUser = getStoredUser(tokenCandidate)
-      userId = storedUser?.login || (tokenCandidate.startsWith('cg_') ? tokenCandidate : null)
-    }
-
-    // If no user is logged in, return empty persistent history
-    if (!userId) {
+    const authUser = resolveAuthenticatedUser(request)
+    if (!authUser || !authUser.userId) {
       return response.json({ analyses: [] })
     }
 
-    const recents = await getRecentAnalyses(userId, 15)
+    const recents = await getRecentAnalyses(authUser.userId, 15)
     response.json({ analyses: recents })
   } catch (error) {
     next(error)
   }
 })
 
-// Clear persistent scan history for authenticated user
+// Clear persistent scan history for authenticated user only
 analyzeRouter.delete('/history', async (request, response, next) => {
   try {
-    const { clearUserAnalyses } = await import('../services/analysisStore.js')
-
-    let userId = null
-    const authHeader = request.headers.authorization
-    const tokenCandidate = authHeader?.startsWith('Bearer ') 
-      ? authHeader.slice(7).trim() 
-      : (typeof request.query.token === 'string' ? request.query.token.trim() : null)
-
-    if (tokenCandidate) {
-      const storedUser = getStoredUser(tokenCandidate)
-      userId = storedUser?.login || (tokenCandidate.startsWith('cg_') ? tokenCandidate : null)
+    const authUser = resolveAuthenticatedUser(request)
+    if (!authUser || !authUser.userId) {
+      return response.status(401).json({ error: 'Authentication required to clear analysis history.', code: 'UNAUTHORIZED' })
     }
 
-    const clientUserHeader = request.headers['x-github-user']
-    if (!userId && clientUserHeader && typeof clientUserHeader === 'string' && clientUserHeader.trim()) {
-      userId = clientUserHeader.trim()
-    }
-
-    if (!userId) {
-      return response.json({ success: true, cleared: 0 })
-    }
-
-    await clearUserAnalyses(userId)
+    await clearUserAnalyses(authUser.userId)
     response.json({ success: true })
   } catch (error) {
     next(error)
   }
 })
 
-// Retrieve single analysis from Firestore or cache by ID
+/**
+ * Retrieve single analysis from Firestore or cache by ID.
+ * Enforces ownership verification:
+ * - Not authenticated -> 401
+ * - Analysis doesn't exist -> 404
+ * - Analysis exists but belongs to another user -> 403
+ * - Owner -> return analysis
+ */
 analyzeRouter.get('/analysis/:id', async (request, response, next) => {
   try {
-    const { getAnalysis } = await import('../services/analysisStore.js')
+    const authUser = resolveAuthenticatedUser(request)
+    if (!authUser) {
+      return response.status(401).json({
+        error: 'Authentication required to access analysis records.',
+        code: 'UNAUTHORIZED'
+      })
+    }
+
     const record = await getAnalysis(request.params.id)
     if (!record) {
-      return response.status(404).json({ message: 'Analysis not found' })
+      return response.status(404).json({
+        error: 'Analysis not found.',
+        code: 'NOT_FOUND'
+      })
     }
+
+    // Ownership verification
+    const currentUserId = authUser.userId
+    const currentUserLogin = authUser.user?.login
+    const recordUserId = record.userId
+
+    // If analysis is owned by someone else, forbid access
+    if (recordUserId && recordUserId !== currentUserId && recordUserId !== currentUserLogin) {
+      return response.status(403).json({
+        error: 'Access forbidden: you do not have permission to view this analysis.',
+        code: 'FORBIDDEN'
+      })
+    }
+
     response.json(record)
   } catch (error) {
     next(error)

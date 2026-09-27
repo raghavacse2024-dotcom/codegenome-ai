@@ -1,82 +1,44 @@
 import { Router } from 'express'
-import fs from 'node:fs'
-import path from 'node:path'
+import { sessionStore } from '../services/sessionStore.js'
+import { resolveAuthenticatedUser } from '../services/authResolver.js'
 
 export const authRouter = Router()
 
-const TOKEN_STORE_PATH = path.resolve(process.cwd(), '.token_store.json')
-
-function loadTokens() {
-  const store = new Map()
-  try {
-    if (fs.existsSync(TOKEN_STORE_PATH)) {
-      const raw = JSON.parse(fs.readFileSync(TOKEN_STORE_PATH, 'utf8'))
-      const now = Date.now()
-      for (const [id, record] of Object.entries(raw)) {
-        if (record && (record.token || record.user) && (now - (record.timestamp || 0) < 30 * 24 * 60 * 60 * 1000)) {
-          store.set(id, record)
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[Auth] Could not load persisted token store:', err.message)
-  }
-  return store
-}
-
-function saveTokens(store) {
-  try {
-    const obj = {}
-    for (const [id, record] of store.entries()) {
-      obj[id] = record
-    }
-    fs.writeFileSync(TOKEN_STORE_PATH, JSON.stringify(obj, null, 2), 'utf8')
-  } catch (err) {
-    console.warn('[Auth] Could not save token store:', err.message)
-  }
-}
-
-// Persistent token store mapped by session ID
-const tokenStore = loadTokens()
-
-// Cleanup old tokens after 30 days
-setInterval(() => {
-  const now = Date.now()
-  let changed = false
-  for (const [id, record] of tokenStore.entries()) {
-    if (now - record.timestamp > 30 * 24 * 60 * 60 * 1000) {
-      tokenStore.delete(id)
-      changed = true
-    }
-  }
-  if (changed) saveTokens(tokenStore)
-}, 60 * 60 * 1000)
-
 export function getStoredToken(sessionId) {
   if (!sessionId) return null
-  return tokenStore.get(sessionId)?.token || null
+  return sessionStore.getSession(sessionId)?.token || null
 }
 
 export function getStoredUser(sessionId) {
   if (!sessionId) return null
-  return tokenStore.get(sessionId)?.user || null
+  return sessionStore.getSession(sessionId)?.user || null
 }
 
 export function setStoredToken(sessionId, token, user) {
   if (!sessionId) return
-  tokenStore.set(sessionId, { token, user, timestamp: Date.now() })
-  saveTokens(tokenStore)
+  const existing = sessionStore.getSession(sessionId)
+  if (existing) {
+    sessionStore.updateSession(sessionId, { token, user })
+  } else {
+    sessionStore.sessions.set(sessionId, {
+      sessionId,
+      token,
+      user,
+      userId: user?.login || null,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + sessionStore.SESSION_TTL_MS,
+    })
+    sessionStore.save()
+  }
 }
 
 export function clearStoredToken(sessionId) {
   if (sessionId) {
-    tokenStore.delete(sessionId)
-    saveTokens(tokenStore)
+    sessionStore.deleteSession(sessionId)
   }
 }
 
 function getAppUrl(req) {
-  // Use explicit environment variable if set, else origin/referer or fallback
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, '')
   const origin = req.headers.origin || (req.headers.referer ? new URL(req.headers.referer).origin : null)
   if (origin) return origin.replace(/\/$/, '')
@@ -84,7 +46,7 @@ function getAppUrl(req) {
 }
 
 /**
- * Returns the GitHub OAuth authorization URL or configuration status.
+ * Returns the GitHub OAuth authorization URL with cryptographically secure state.
  */
 authRouter.get('/auth/github/url', (req, res) => {
   const clientId = process.env.GITHUB_CLIENT_ID?.trim()
@@ -100,8 +62,8 @@ authRouter.get('/auth/github/url', (req, res) => {
     })
   }
 
-  // Generate random state for CSRF safety
-  const state = Math.random().toString(36).substring(2, 15)
+  // Generate cryptographically secure state using crypto.randomBytes and store server-side
+  const state = sessionStore.createOAuthState({ redirectUri })
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -118,7 +80,8 @@ authRouter.get('/auth/github/url', (req, res) => {
 })
 
 /**
- * Validates a GitHub Personal Access Token or OAuth token and retrieves user info.
+ * Validates a GitHub Personal Access Token or OAuth token and creates a secure session.
+ * Never logs the token and never echoes it back in the response.
  */
 authRouter.post('/auth/github/token', async (req, res) => {
   try {
@@ -141,142 +104,112 @@ authRouter.post('/auth/github/token', async (req, res) => {
     }
 
     const user = await userRes.json()
-    // Generate a session token
-    const sessionId = 'cg_' + Math.random().toString(36).substring(2) + Date.now().toString(36)
-    setStoredToken(sessionId, cleanToken, {
-      login: user.login,
-      name: user.name || user.login,
-      avatar_url: user.avatar_url,
-      html_url: user.html_url,
-    })
-
-    res.json({
-      sessionId,
-      user: {
-        login: user.login,
-        name: user.name || user.login,
-        avatar_url: user.avatar_url,
-        html_url: user.html_url,
-      },
-    })
-  } catch (error) {
-    res.status(500).json({ error: error.message || 'Failed to authenticate token' })
-  }
-})
-
-/**
- * Returns current authenticated user profile
- */
-authRouter.get('/auth/user', async (req, res) => {
-  const authHeader = req.headers.authorization
-  let token = null
-  let sessionId = null
-
-  if (authHeader?.startsWith('Bearer ')) {
-    const raw = authHeader.slice(7).trim()
-    if (raw.startsWith('cg_')) {
-      sessionId = raw
-      token = getStoredToken(raw)
-    } else {
-      token = raw
-    }
-  }
-
-  const stored = sessionId ? tokenStore.get(sessionId) : null
-  if (stored?.user) {
-    return res.json({ authenticated: true, user: stored.user })
-  }
-
-  const clientUserHeader = req.headers['x-github-user']
-  if (sessionId && clientUserHeader && typeof clientUserHeader === 'string' && clientUserHeader.trim()) {
-    const username = clientUserHeader.trim()
-    const recoveredUser = {
-      login: username,
-      name: username,
-      avatar_url: `https://github.com/${username}.png`,
-      html_url: `https://github.com/${username}`,
-    }
-    setStoredToken(sessionId, token || null, recoveredUser)
-    return res.json({ authenticated: true, user: recoveredUser })
-  }
-
-  if (!token) {
-    return res.json({ authenticated: false, user: null })
-  }
-
-  try {
-    const userRes = await fetch('https://api.github.com/user', {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${token}`,
-        'User-Agent': 'CodeGenome-AI',
-      },
-    })
-
-    if (!userRes.ok) {
-      if (sessionId) clearStoredToken(sessionId)
-      return res.json({ authenticated: false, user: null })
-    }
-
-    const user = await userRes.json()
     const userData = {
       login: user.login,
       name: user.name || user.login,
       avatar_url: user.avatar_url,
       html_url: user.html_url,
     }
-    if (sessionId) {
-      setStoredToken(sessionId, token, userData)
-    }
 
-    res.json({ authenticated: true, user: userData })
-  } catch {
-    res.json({ authenticated: false, user: null })
+    // Create session with cryptographically secure identifier
+    const session = sessionStore.createSession({
+      token: cleanToken,
+      user: userData,
+      userId: user.login,
+    })
+
+    // Return session ID and user only — never return raw token to client
+    res.json({
+      sessionId: session.sessionId,
+      user: userData,
+    })
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to authenticate token.' })
   }
 })
 
 /**
- * Registers or syncs a client session with user profile
+ * Returns current authenticated user profile derived strictly from valid session/token.
+ * Arbitrary client headers like x-github-user are NOT accepted as proof of identity.
+ */
+authRouter.get('/auth/user', async (req, res) => {
+  const authUser = resolveAuthenticatedUser(req)
+  if (!authUser || !authUser.user) {
+    return res.json({ authenticated: false, user: null })
+  }
+
+  // If we already have user details in session
+  if (authUser.user.login && authUser.user.login !== 'token_user') {
+    return res.json({ authenticated: true, user: authUser.user })
+  }
+
+  // If token is present but user profile needed fetching
+  if (authUser.token) {
+    try {
+      const userRes = await fetch('https://api.github.com/user', {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${authUser.token}`,
+          'User-Agent': 'CodeGenome-AI',
+        },
+      })
+
+      if (!userRes.ok) {
+        if (authUser.sessionId) sessionStore.deleteSession(authUser.sessionId)
+        return res.json({ authenticated: false, user: null })
+      }
+
+      const user = await userRes.json()
+      const userData = {
+        login: user.login,
+        name: user.name || user.login,
+        avatar_url: user.avatar_url,
+        html_url: user.html_url,
+      }
+      if (authUser.sessionId) {
+        sessionStore.updateSession(authUser.sessionId, { user: userData, userId: user.login })
+      }
+
+      return res.json({ authenticated: true, user: userData })
+    } catch {
+      return res.json({ authenticated: false, user: null })
+    }
+  }
+
+  res.json({ authenticated: false, user: null })
+})
+
+/**
+ * Registers or syncs a client session with user profile.
  */
 authRouter.post('/auth/session', (req, res) => {
   const { sessionId, user, token } = req.body
-  if (sessionId) {
-    setStoredToken(sessionId, token || null, user || null)
+  if (sessionId && typeof sessionId === 'string') {
+    const existing = sessionStore.getSession(sessionId)
+    if (existing) {
+      sessionStore.updateSession(sessionId, { user, token })
+    } else {
+      sessionStore.sessions.set(sessionId, {
+        sessionId,
+        token: token || null,
+        user: user || null,
+        userId: user?.login || null,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + sessionStore.SESSION_TTL_MS,
+      })
+      sessionStore.save()
+    }
   }
   res.json({ success: true })
 })
 
 /**
- * Returns list of repositories accessible to the user
+ * Returns list of repositories accessible to the authenticated user.
  */
 authRouter.get('/auth/repos', async (req, res) => {
-  const authHeader = req.headers.authorization
-  const customPat = req.headers['x-github-token']
-  let token = process.env.GITHUB_TOKEN || null
-  let sessionId = null
-
-  if (authHeader?.startsWith('Bearer ')) {
-    const raw = authHeader.slice(7).trim()
-    if (raw.startsWith('cg_')) {
-      sessionId = raw
-      const stored = tokenStore.get(raw)
-      if (stored?.token) token = stored.token
-    } else if (raw && raw.length > 5) {
-      token = raw
-    }
-  }
-
-  if (customPat && typeof customPat === 'string' && customPat.trim().length > 5) {
-    token = customPat.trim()
-  }
-
-  let username = (req.query.username ? String(req.query.username) : null) || (req.headers['x-github-user'] ? String(req.headers['x-github-user']) : null)
-  if (!username && sessionId) {
-    const stored = tokenStore.get(sessionId)
-    if (stored?.user?.login) {
-      username = stored.user.login
-    }
-  }
+  const authUser = resolveAuthenticatedUser(req)
+  let token = authUser?.token || process.env.GITHUB_TOKEN || null
+  let username = authUser?.user?.login || null
 
   if (token && (!username || username === 'developer')) {
     try {
@@ -302,7 +235,6 @@ authRouter.get('/auth/repos', async (req, res) => {
 
   try {
     if (token) {
-      // Fetch authenticated user's repositories across multiple pages (up to 5 pages = 500 repos)
       for (let page = 1; page <= 5; page++) {
         const fetchUrl = `https://api.github.com/user/repos?visibility=all&sort=updated&per_page=100&page=${page}&affiliation=owner,collaborator,organization_member`
         const reposRes = await fetch(fetchUrl, {
@@ -330,7 +262,6 @@ authRouter.get('/auth/repos', async (req, res) => {
       }
     }
 
-    // Also fetch public repos for username if not already fetched or if token is public-only
     if (username && username !== 'developer') {
       for (let page = 1; page <= 5; page++) {
         const fetchUrl = `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated&per_page=100&page=${page}`
@@ -358,9 +289,7 @@ authRouter.get('/auth/repos', async (req, res) => {
 
     const rawList = Array.from(repoMap.values())
     if (rawList.length > 0) {
-      // Sort by updated_at descending
       rawList.sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())
-
       const mapped = rawList.map((r) => ({
         name: r.name,
         fullName: r.full_name,
@@ -378,7 +307,6 @@ authRouter.get('/auth/repos', async (req, res) => {
     console.warn('[Server] Error fetching GitHub repos:', err.message)
   }
 
-  // Resilient fallback repository list
   const fallbackRepos = [
     {
       name: 'codegenome-ai',
@@ -400,8 +328,9 @@ authRouter.get('/auth/repos', async (req, res) => {
  */
 authRouter.post('/auth/logout', (req, res) => {
   const authHeader = req.headers.authorization
-  if (authHeader?.startsWith('Bearer cg_')) {
-    clearStoredToken(authHeader.slice(7).trim())
+  if (authHeader?.startsWith('Bearer ')) {
+    const raw = authHeader.slice(7).trim()
+    sessionStore.deleteSession(raw)
   }
   res.json({ success: true })
 })

@@ -127,9 +127,9 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
     },
     {
       icon: <Code2 className="w-6 h-6 text-violet" />,
-      title: "Automated Refactor Blueprint",
+      title: "AI-Assisted Refactor Recommendations",
       badge: "Code Generation",
-      frontDesc: "Compiles complete, drop-in replacement code scaffolds with TypeScript types and docstrings.",
+      frontDesc: "Compiles static-analysis-informed refactoring scaffolds with TypeScript types and docstrings.",
       backTitle: "Clean Code Generator",
       backDesc: "Outputs decoupled interfaces, optimized async functions, and unit testable architectural scaffolds.",
       stats: "1-Click Download ZIP Scaffold"
@@ -213,7 +213,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
     {
       name: "Review Agent",
       role: "Quality & Safety Telemetry",
-      desc: "Validates AST compliance, zero breaking changes, and read-only protocol verification.",
+      desc: "Validates AST compliance, syntax integrity, and contract compatibility.",
       color: "var(--neon)"
     }
   ]

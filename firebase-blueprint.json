@@ -14,6 +14,7 @@
       "type": "object",
       "properties": {
         "analysisId": { "type": "string" },
+        "userId": { "type": "string" },
         "repo": {
           "type": "object",
           "properties": {
@@ -30,10 +31,10 @@
         "isDemo": { "type": "boolean" },
         "results": { "type": "object" },
         "events": { "type": "array" },
-        "createdAt": { "type": "string" },
-        "userId": { "type": "string" }
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string" }
       },
-      "required": ["analysisId", "repo", "createdAt"]
+      "required": ["analysisId", "userId", "repo", "createdAt"]
     }
   },
   "firestore": {

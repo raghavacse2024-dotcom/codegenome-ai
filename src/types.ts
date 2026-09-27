@@ -81,11 +81,19 @@ export type RefactorGitDiff = {
   files: FileDiff[]
 }
 
+export type RefactorValidation = {
+  tests: 'passed' | 'failed' | 'skipped'
+  lint: 'passed' | 'failed' | 'skipped'
+  typecheck: 'passed' | 'failed' | 'skipped'
+  build: 'passed' | 'failed' | 'skipped'
+  safeToPropose: boolean
+}
+
 export type PullRequestResult = {
   success: boolean
-  mode: 'live' | 'simulated'
+  mode: 'live' | 'ready' | 'simulated' | 'blocked' | 'validation_failed'
   pushed?: boolean
-  prUrl?: string
+  prUrl?: string | null
   prNumber?: number
   branch: string
   baseBranch: string
@@ -94,16 +102,32 @@ export type PullRequestResult = {
   patch?: string
   cliCommand?: string
   message?: string
+  error?: string
+  violations?: string[]
+  isHighRisk?: boolean
+  validation?: RefactorValidation
+  failedStep?: string | null
 }
 
 export type Analysis = {
   analysisId: string
+  userId?: string | null
   createdAt?: string
-  repo: { owner: string; repository: string; url: string; description: string; stars: number; defaultBranch: string }
+  repo: { owner: string; repository: string; url: string; description: string; stars: number; defaultBranch: string; private?: boolean }
   source: 'live' | 'demo-safe'
   isDemo: boolean
   mode: 'live' | 'demo'
   events: AgentEvent[]
+  metadata?: {
+    analyzedFileCount: number
+    repositoryFileCount?: number
+    samplingUsed: boolean
+    samplingLimit?: number
+    skippedFileCount?: number
+    totalAnalyzedBytes?: number
+    analysisCoverage?: string
+    samplingNotice?: string
+  }
   results: {
     architecture: { 
       data: { 

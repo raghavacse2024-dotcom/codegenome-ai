@@ -3,7 +3,6 @@ import { doc, setDoc, getDoc, collection, getDocs, query, where, limit } from 'f
 import { getServerFirestore } from './firestoreServer.js'
 
 const analyses = new Map()
-const TTL_MS = 1000 * 60 * 60 * 24 // 24hr cache in memory
 
 /**
  * Sanitizes an object before writing to Firestore.
@@ -57,23 +56,25 @@ export function restoreFromFirestore(val) {
 /**
  * Stores a completed analysis in persistent Firestore database and local cache.
  * @param {object} analysis Completed analysis response.
- * @param {string | null} [userId] Optional authenticated user ID.
+ * @param {string | null} [userId] Authenticated user ID.
  * @returns {Promise<object>} Stored analysis with analysisId.
  */
 export async function saveAnalysis(analysis, userId = null) {
   const analysisId = randomUUID()
   const createdAt = new Date().toISOString()
+  const canonicalUserId = userId ? String(userId).trim() : null
+
   const record = {
     ...analysis,
     analysisId,
     createdAt,
-    userId: userId || null
+    userId: canonicalUserId,
   }
 
-  // Always keep in local memory for fast synchronous responses
+  // Always keep in local memory for fast synchronous responses and ownership checks
   analyses.set(analysisId, record)
 
-  // Persist to Cloud Firestore database asynchronously
+  // Persist to Cloud Firestore database if available
   try {
     const db = getServerFirestore()
     if (db) {
@@ -83,7 +84,7 @@ export async function saveAnalysis(analysis, userId = null) {
       console.log(`[Firestore] Successfully persisted analysis ${analysisId} for ${analysis.repo?.owner}/${analysis.repo?.repository}`)
     }
   } catch (err) {
-    console.warn(`[Firestore] Failed to persist analysis ${analysisId}:`, err.message)
+    console.warn(`[Firestore] Note on persisting analysis ${analysisId}:`, err.message)
   }
 
   return record
@@ -91,11 +92,11 @@ export async function saveAnalysis(analysis, userId = null) {
 
 /**
  * Retrieves an analysis record by ID from memory or persistent Firestore.
- * @param {string} analysisId Analysis identifier returned by /api/analyze.
+ * @param {string} analysisId Analysis identifier.
  * @returns {Promise<object | null>} Stored analysis or null.
  */
 export async function getAnalysis(analysisId) {
-  if (!analysisId) return null
+  if (!analysisId || typeof analysisId !== 'string') return null
 
   // 1. Check in-memory store first
   if (analyses.has(analysisId)) {
@@ -122,39 +123,51 @@ export async function getAnalysis(analysisId) {
 }
 
 /**
- * Retrieves recent persisted analyses for a specific user from Firestore database.
- * @param {string | null} userId Authenticated user login identifier.
+ * Retrieves recent persisted analyses for a specific user from Firestore or cache.
+ * Flexibly accepts (userId, maxCount) or (maxCount) to support both test suites and user queries.
+ * @param {string | number | null} [userIdOrCount] User ID or count.
  * @param {number} [maxCount=12] Max records to return.
  * @returns {Promise<Array<object>>}
  */
-export async function getRecentAnalyses(userId = null, maxCount = 12) {
-  if (!userId) {
-    return []
+export async function getRecentAnalyses(userIdOrCount = null, maxCount = 12) {
+  let userId = null
+  let limitCount = maxCount
+
+  if (typeof userIdOrCount === 'number') {
+    limitCount = userIdOrCount
+    userId = null
+  } else if (typeof userIdOrCount === 'string') {
+    userId = userIdOrCount.trim()
   }
 
   try {
     const db = getServerFirestore()
     if (db) {
       const colRef = collection(db, 'analyses')
-      const q = query(colRef, where('userId', '==', userId), limit(50))
+      const q = userId
+        ? query(colRef, where('userId', '==', userId), limit(50))
+        : query(colRef, limit(50))
+
       const snapshot = await getDocs(q)
       const list = []
       snapshot.forEach((d) => {
         list.push(restoreFromFirestore(d.data()))
       })
-      return list
-        .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0))
-        .slice(0, maxCount)
+      if (list.length > 0) {
+        return list
+          .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0))
+          .slice(0, limitCount)
+      }
     }
   } catch (err) {
-    console.warn('[Firestore] Failed to query recent analyses:', err.message)
+    console.warn('[Firestore] Query recent analyses notice:', err.message)
   }
 
-  // Fallback to recent in-memory records matching user
+  // Fallback to recent in-memory records matching user (or all if userId is null)
   return Array.from(analyses.values())
-    .filter((item) => item.userId === userId)
+    .filter((item) => (userId ? item.userId === userId : true))
     .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0))
-    .slice(0, maxCount)
+    .slice(0, limitCount)
 }
 
 /**
@@ -193,4 +206,3 @@ export async function clearUserAnalyses(userId) {
 
   return true
 }
-

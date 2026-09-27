@@ -11,6 +11,7 @@ import { healthRouter } from './routes/health.js'
 import { qaRouter } from './routes/qa.js'
 import { prRouter } from './routes/pr.js'
 import { errorHandler, requestLogger } from './middleware/errorHandler.js'
+import { sessionStore } from './services/sessionStore.js'
 
 const app = express()
 const port = Number(process.env.PORT || 3000)
@@ -32,9 +33,9 @@ app.all('/api/*', (req, res) => {
   res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` })
 })
 
-// OAuth Callback handler matching AI Studio OAuth skill specification
+// OAuth Callback handler with cryptographically secure CSRF state verification
 app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
-  const { code, error, error_description } = req.query
+  const { code, state, error, error_description } = req.query
 
   if (error || !code) {
     const errorMsg = error_description || error || 'OAuth authorization was cancelled or failed.'
@@ -49,6 +50,27 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
             if (window.opener) {
               window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', error: ${JSON.stringify(errorMsg)} }, '*');
               setTimeout(() => window.close(), 2500);
+            }
+          </script>
+        </body>
+      </html>
+    `)
+  }
+
+  // Validate OAuth state against server-side store to prevent CSRF and replay attacks
+  const isValidState = sessionStore.validateAndConsumeOAuthState(state)
+  if (!isValidState) {
+    return res.status(403).send(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Invalid OAuth State</title></head>
+        <body style="font-family:system-ui,sans-serif;background:#091220;color:#e8f1fb;padding:32px;text-align:center;">
+          <h2 style="color:#ff6b6b;">Authentication Security Error</h2>
+          <p>Invalid or expired OAuth state parameter (CSRF protection failed). Please try signing in again.</p>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', error: 'Invalid or expired OAuth state. Please initiate login again.' }, '*');
+              setTimeout(() => window.close(), 3000);
             }
           </script>
         </body>
@@ -99,16 +121,21 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
       user = await userRes.json()
     }
 
-    const sessionId = 'cg_' + Math.random().toString(36).substring(2) + Date.now().toString(36)
     const userData = {
       login: user.login,
       name: user.name || user.login,
       avatar_url: user.avatar_url,
       html_url: user.html_url,
     }
-    setStoredToken(sessionId, accessToken, userData)
 
-    // Return popup postMessage script per OAuth skill guidelines
+    // Store token securely on the server; associate with cryptographic session ID
+    const session = sessionStore.createSession({
+      token: accessToken,
+      user: userData,
+      userId: user.login,
+    })
+
+    // Return popup postMessage script without exposing raw access token to client
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -119,8 +146,7 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
           <script>
             const payload = {
               type: 'OAUTH_AUTH_SUCCESS',
-              sessionId: ${JSON.stringify(sessionId)},
-              token: ${JSON.stringify(accessToken)},
+              sessionId: ${JSON.stringify(session.sessionId)},
               user: ${JSON.stringify(userData)}
             };
             if (window.opener) {
