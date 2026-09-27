@@ -1,4 +1,5 @@
 import type { Analysis, GitHubUser, QaAnswer, UserRepo, AgentEvent } from '../types'
+import { auth } from './firebase'
 
 const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 const SESSION_STORAGE_KEY = 'codegenome_github_session'
@@ -48,9 +49,11 @@ async function request<T>(path: string, init: RequestInit, timeoutMs = 60_000): 
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
   const token = getSessionToken()
   const pat = getGitHubPat()
+  const fbUid = auth?.currentUser?.uid
   const authHeaders: Record<string, string> = {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(pat ? { 'X-GitHub-Token': pat } : {}),
+    ...(fbUid ? { 'X-Firebase-UID': fbUid } : {}),
   }
 
   try {

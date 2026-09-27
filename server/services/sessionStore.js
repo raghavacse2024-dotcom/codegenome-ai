@@ -2,10 +2,67 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm'
+
+function getEncryptionKey() {
+  const secret = process.env.SESSION_ENCRYPTION_KEY || process.env.ENCRYPTION_SECRET || 'codegenome-session-key-salt-production-32b'
+  return crypto.scryptSync(secret, 'codegenome-secure-token-salt', 32)
+}
+
+/**
+ * Encrypts a sensitive access token using AES-256-GCM before writing to disk.
+ * @param {string | null} token Plaintext token.
+ * @returns {string | null} Authenticated encrypted string (iv:tag:ciphertext).
+ */
+export function encryptToken(token) {
+  if (!token || typeof token !== 'string') return null
+  try {
+    const key = getEncryptionKey()
+    const iv = crypto.randomBytes(12)
+    const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv)
+    let encrypted = cipher.update(token, 'utf8', 'hex')
+    encrypted += cipher.final('hex')
+    const tag = cipher.getAuthTag()
+    return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted}`
+  } catch (err) {
+    console.warn('[SessionStore] Encryption error:', err.message)
+    return null
+  }
+}
+
+/**
+ * Decrypts an AES-256-GCM encrypted token payload from disk.
+ * Supports backward-compatibility if an unencrypted legacy token is encountered.
+ * @param {string | null} encryptedPayload Encrypted string (iv:tag:ciphertext) or legacy token.
+ * @returns {string | null} Decrypted plaintext token.
+ */
+export function decryptToken(encryptedPayload) {
+  if (!encryptedPayload || typeof encryptedPayload !== 'string') return null
+  // If not formatted as iv:tag:ciphertext, treat as legacy unencrypted token during migration
+  if (!encryptedPayload.includes(':')) {
+    return encryptedPayload
+  }
+  try {
+    const parts = encryptedPayload.split(':')
+    if (parts.length !== 3) return null
+    const [ivHex, tagHex, dataHex] = parts
+    const key = getEncryptionKey()
+    const iv = Buffer.from(ivHex, 'hex')
+    const tag = Buffer.from(tagHex, 'hex')
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv)
+    decipher.setAuthTag(tag)
+    let decrypted = decipher.update(dataHex, 'hex', 'utf8')
+    decrypted += decipher.final('utf8')
+    return decrypted
+  } catch (err) {
+    console.warn('[SessionStore] Decryption error:', err.message)
+    return null
+  }
+}
+
 /**
  * Interface-compatible SessionStore for CodeGenomeAI.
- * Currently uses an in-memory store with file-backed persistence for local/demo runs,
- * architected with an adapter pattern ready for drop-in Redis persistence.
+ * Uses an in-memory store with AES-256-GCM encrypted persistence on disk.
  */
 class MemorySessionStore {
   constructor(filePath) {
@@ -32,10 +89,12 @@ class MemorySessionStore {
         const now = Date.now()
         for (const [id, record] of Object.entries(raw)) {
           if (record && (now - (record.createdAt || record.timestamp || 0) < this.SESSION_TTL_MS)) {
+            // Decrypt token from disk into memory
+            const decryptedToken = decryptToken(record.token)
             this.sessions.set(id, {
               sessionId: id,
-              token: record.token || null,
-              userId: record.userId || record.user?.login || null,
+              token: decryptedToken,
+              userId: record.userId || (record.user?.id ? `gh_${record.user.id}` : record.user?.login) || null,
               user: record.user || null,
               createdAt: record.createdAt || record.timestamp || now,
               expiresAt: record.expiresAt || (now + this.SESSION_TTL_MS),
@@ -54,7 +113,8 @@ class MemorySessionStore {
       for (const [id, record] of this.sessions.entries()) {
         obj[id] = {
           sessionId: id,
-          token: record.token,
+          // CRITICAL: Always encrypt tokens before writing to disk
+          token: encryptToken(record.token),
           userId: record.userId,
           user: record.user,
           createdAt: record.createdAt,

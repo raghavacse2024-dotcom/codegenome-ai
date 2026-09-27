@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { AnalyzeRequestSchema } from '../contracts.js'
 import { analyzeRepository } from '../services/analysisEngine.js'
 import { saveAnalysis, getAnalysis, getRecentAnalyses, clearUserAnalyses } from '../services/analysisStore.js'
-import { resolveAuthenticatedUser } from '../services/authResolver.js'
+import { resolveAuthenticatedUser, assertAnalysisOwnership } from '../services/authResolver.js'
 import { analyzeRateLimiter } from '../middleware/rateLimiter.js'
 
 export const analyzeRouter = Router()
@@ -143,18 +143,7 @@ analyzeRouter.get('/analysis/:id', async (request, response, next) => {
       })
     }
 
-    // Ownership verification
-    const currentUserId = authUser.userId
-    const currentUserLogin = authUser.user?.login
-    const recordUserId = record.userId
-
-    // If analysis is owned by someone else, forbid access
-    if (recordUserId && recordUserId !== currentUserId && recordUserId !== currentUserLogin) {
-      return response.status(403).json({
-        error: 'Access forbidden: you do not have permission to view this analysis.',
-        code: 'FORBIDDEN'
-      })
-    }
+    assertAnalysisOwnership(record, authUser)
 
     response.json(record)
   } catch (error) {

@@ -23,6 +23,13 @@ describe('Security: Secret Detection & Redaction', () => {
     expect(red2).toContain('[REDACTED_GITHUB_TOKEN]')
   })
 
+  it('redacts GitLab Personal Access Tokens', () => {
+    const rawGitLab = 'gitlab_token = "glpat-abcdef1234567890_XYZW"'
+    const redacted = redactSecrets(rawGitLab)
+    expect(redacted).not.toContain('glpat-abcdef1234567890_XYZW')
+    expect(redacted).toContain('[REDACTED_GITLAB_TOKEN]')
+  })
+
   it('redacts AWS Access Key ID and Secret Access Key', () => {
     const raw = 'aws_access_key_id = AKIAIOSFODNN7EXAMPLE\naws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
     const redacted = redactSecrets(raw)

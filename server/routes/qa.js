@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { getAnalysis } from '../services/analysisStore.js'
 import { redactSecrets } from '../services/secretRedactor.js'
 import { qaRateLimiter } from '../middleware/rateLimiter.js'
+import { resolveAuthenticatedUser, assertAnalysisOwnership } from '../services/authResolver.js'
 
 export const qaRouter = Router()
 
@@ -28,6 +29,10 @@ qaRouter.post('/qa', qaRateLimiter, async (request, response, next) => {
     let analysis = null
     if (analysisId && analysisId.trim()) {
       analysis = await getAnalysis(analysisId)
+      if (analysis) {
+        const authUser = resolveAuthenticatedUser(request)
+        assertAnalysisOwnership(analysis, authUser)
+      }
     }
     if (!analysis) {
       analysis = {

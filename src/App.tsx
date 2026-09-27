@@ -16,7 +16,7 @@ import { useTheme } from './hooks/useTheme'
 import { isPageReload } from './utils/navigation'
 import type { GitHubUser, Analysis } from './types'
 
-const demoUrl = 'https://github.com/raghavacse2024-dotcom/codegenome-ai'
+const demoUrl = 'https://github.com/expressjs/express'
 const agents = ['Architecture', 'Technical Debt', 'Risk & Cost', 'Refactor Planner', 'Review']
 const sections = [
   { id: 'analyze', label: 'Command Prompt' },

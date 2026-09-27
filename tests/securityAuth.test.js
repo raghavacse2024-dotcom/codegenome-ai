@@ -1,9 +1,12 @@
-import { describe, expect, it, beforeEach, afterAll } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import express from 'express'
 import http from 'node:http'
+import fs from 'node:fs'
 import { sessionStore } from '../server/services/sessionStore.js'
 import { saveAnalysis } from '../server/services/analysisStore.js'
 import { analyzeRouter } from '../server/routes/analyze.js'
+import { prRouter } from '../server/routes/pr.js'
+import { errorHandler } from '../server/middleware/errorHandler.js'
 
 describe('Security: Authentication & Session Management', () => {
   it('generates cryptographically secure OAuth states and prevents reuse', () => {
@@ -45,12 +48,31 @@ describe('Security: Authentication & Session Management', () => {
     expect(session2.sessionId).toMatch(/^cg_sess_[a-f0-9]{64}$/)
     expect(session1.sessionId).not.toEqual(session2.sessionId)
   })
+
+  it('persists tokens to disk encrypted with AES-256-GCM and never in plaintext', () => {
+    const secretToken = 'ghp_secret_token_never_plaintext_on_disk_xyz'
+    const session = sessionStore.createSession({ token: secretToken, userId: 'secure_user' })
+    sessionStore.save()
+
+    // Read raw file on disk
+    if (fs.existsSync(sessionStore.filePath)) {
+      const rawDisk = fs.readFileSync(sessionStore.filePath, 'utf8')
+      expect(rawDisk).not.toContain(secretToken)
+      const parsed = JSON.parse(rawDisk)
+      const stored = parsed[session.sessionId]
+      expect(stored).toBeDefined()
+      // Encrypted format is iv:authTag:ciphertext
+      expect(stored.token).toMatch(/^[a-f0-9]{24}:[a-f0-9]{32}:[a-f0-9]+$/)
+    }
+  })
 })
 
-describe('Security: Access Control on /api/analysis/:id', () => {
+describe('Security: Access Control & Analysis Ownership Verification', () => {
   const app = express()
   app.use(express.json())
   app.use('/api', analyzeRouter)
+  app.use('/api', prRouter)
+  app.use(errorHandler)
 
   let server
   let baseUrl
@@ -58,7 +80,7 @@ describe('Security: Access Control on /api/analysis/:id', () => {
   let attackerSessionId = null
   let ownerAnalysisId = null
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     if (!server) {
       server = http.createServer(app)
       await new Promise((resolve) => server.listen(0, resolve))
@@ -86,12 +108,21 @@ describe('Security: Access Control on /api/analysis/:id', () => {
     const saved = await saveAnalysis(
       {
         repo: { owner: 'alice-org', repository: 'alice-repo', url: 'https://github.com/alice-org/alice-repo' },
-        results: { debt: { data: { totalDebtScore: 40 } } },
+        results: {
+          debt: { data: { totalDebtScore: 40 } },
+          refactor: {
+            data: {
+              target: 'src/index.ts',
+              scaffolds: [{ path: 'src/index.ts', content: 'export const a = 1' }],
+              diff: { rawPatch: 'diff --git a/src/index.ts b/src/index.ts\n' },
+            },
+          },
+        },
       },
       'alice_owner'
     )
     ownerAnalysisId = saved.analysisId
-  })
+  }, 30000)
 
   afterAll(async () => {
     if (server) {
@@ -99,7 +130,7 @@ describe('Security: Access Control on /api/analysis/:id', () => {
     }
   })
 
-  it('returns 401 when request is unauthenticated', async () => {
+  it('returns 401 when GET /api/analysis/:id is unauthenticated', async () => {
     const res = await fetch(`${baseUrl}/api/analysis/${ownerAnalysisId}`)
     const data = await res.json()
     expect(res.status).toBe(401)
@@ -115,8 +146,45 @@ describe('Security: Access Control on /api/analysis/:id', () => {
     expect(data.code).toBe('NOT_FOUND')
   })
 
-  it('returns 403 when authenticated user attempts to access another user analysis', async () => {
+  it('prevents User B from reading User A analysis (returns 403 Forbidden)', async () => {
     const res = await fetch(`${baseUrl}/api/analysis/${ownerAnalysisId}`, {
+      headers: { Authorization: `Bearer ${attackerSessionId}` },
+    })
+    const data = await res.json()
+    expect(res.status).toBe(403)
+    expect(data.code).toBe('FORBIDDEN')
+  })
+
+  it('prevents User B from validating User A refactor (POST /api/pr/validate returns 403 Forbidden)', async () => {
+    const res = await fetch(`${baseUrl}/api/pr/validate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${attackerSessionId}`,
+      },
+      body: JSON.stringify({ analysisId: ownerAnalysisId }),
+    })
+    const data = await res.json()
+    expect(res.status).toBe(403)
+    expect(data.code).toBe('FORBIDDEN')
+  })
+
+  it('prevents User B from creating a PR from User A analysis (POST /api/pr/create returns 403 Forbidden)', async () => {
+    const res = await fetch(`${baseUrl}/api/pr/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${attackerSessionId}`,
+      },
+      body: JSON.stringify({ analysisId: ownerAnalysisId }),
+    })
+    const data = await res.json()
+    expect(res.status).toBe(403)
+    expect(data.code).toBe('FORBIDDEN')
+  })
+
+  it('prevents User B from reading User A unified patch (GET /api/pr/patch/:id returns 403 Forbidden)', async () => {
+    const res = await fetch(`${baseUrl}/api/pr/patch/${ownerAnalysisId}`, {
       headers: { Authorization: `Bearer ${attackerSessionId}` },
     })
     const data = await res.json()

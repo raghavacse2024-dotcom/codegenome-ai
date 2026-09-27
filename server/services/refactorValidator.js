@@ -37,7 +37,11 @@ export async function validateRefactor({ files = [], targetPath = null, refactor
 
     for (const f of allFiles) {
       const cleanPath = f.path.replace(/^\/+/, '')
-      const fullPath = path.join(tmpDir, cleanPath)
+      const fullPath = path.resolve(tmpDir, cleanPath)
+      // Strict path traversal defense: prevent files from writing outside sandbox directory
+      if (!fullPath.startsWith(tmpDir)) {
+        throw new Error(`Path traversal detected in refactor file: ${f.path}`)
+      }
       fs.mkdirSync(path.dirname(fullPath), { recursive: true })
       fs.writeFileSync(fullPath, f.content || '', 'utf8')
     }

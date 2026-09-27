@@ -55,6 +55,12 @@ const SECRET_PATTERNS = [
     regex: /\bgithub_pat_[A-Za-z0-9_]{50,255}\b/g,
     replace: '[REDACTED_GITHUB_TOKEN]',
   },
+  // GitLab Personal Access Tokens
+  {
+    name: 'GITLAB_TOKEN',
+    regex: /\bglpat-[0-9a-zA-Z_-]{20,}\b/g,
+    replace: '[REDACTED_GITLAB_TOKEN]',
+  },
   // OpenAI API Keys
   {
     name: 'OPENAI_API_KEY',

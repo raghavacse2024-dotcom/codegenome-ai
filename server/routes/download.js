@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import { Router } from 'express'
 import { AnalysisIdSchema } from '../contracts.js'
 import { getAnalysis } from '../services/analysisStore.js'
+import { resolveAuthenticatedUser, assertAnalysisOwnership } from '../services/authResolver.js'
 
 export const downloadRouter = Router()
 
@@ -12,10 +13,14 @@ async function handleDownload(rawId, request, response, next) {
       return response.status(400).json({ error: 'Valid UUID analysisId is required.' })
     }
     const { analysisId } = parseResult.data
+
+    const authUser = resolveAuthenticatedUser(request)
     const analysis = await getAnalysis(analysisId)
     if (!analysis) {
-      return response.status(404).json({ error: 'Analysis not found. Run analysis again before downloading.' })
+      return response.status(404).json({ error: 'Analysis not found. Run analysis again before downloading.', code: 'NOT_FOUND' })
     }
+
+    assertAnalysisOwnership(analysis, authUser)
 
     const zip = new JSZip()
     const scaffolds = analysis.results?.refactor?.data?.scaffolds || []

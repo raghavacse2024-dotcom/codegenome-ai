@@ -105,17 +105,19 @@ authRouter.post('/auth/github/token', async (req, res) => {
 
     const user = await userRes.json()
     const userData = {
+      id: user.id || null,
       login: user.login,
       name: user.name || user.login,
       avatar_url: user.avatar_url,
       html_url: user.html_url,
     }
 
-    // Create session with cryptographically secure identifier
+    // Create session with cryptographically secure identifier and canonical userId
+    const canonicalUserId = user.id ? `gh_${user.id}` : user.login
     const session = sessionStore.createSession({
       token: cleanToken,
       user: userData,
-      userId: user.login,
+      userId: canonicalUserId,
     })
 
     // Return session ID and user only — never return raw token to client
@@ -161,13 +163,15 @@ authRouter.get('/auth/user', async (req, res) => {
 
       const user = await userRes.json()
       const userData = {
+        id: user.id || null,
         login: user.login,
         name: user.name || user.login,
         avatar_url: user.avatar_url,
         html_url: user.html_url,
       }
+      const canonicalUserId = user.id ? `gh_${user.id}` : user.login
       if (authUser.sessionId) {
-        sessionStore.updateSession(authUser.sessionId, { user: userData, userId: user.login })
+        sessionStore.updateSession(authUser.sessionId, { user: userData, userId: canonicalUserId })
       }
 
       return res.json({ authenticated: true, user: userData })
@@ -180,27 +184,69 @@ authRouter.get('/auth/user', async (req, res) => {
 })
 
 /**
- * Registers or syncs a client session with user profile.
+ * Validates session registration.
+ * CRITICAL SECURITY: Never trusts client-supplied user or userId to create or modify identity.
+ * Only accepts registration when accompanied by a valid, verified GitHub token or valid active session.
  */
-authRouter.post('/auth/session', (req, res) => {
-  const { sessionId, user, token } = req.body
-  if (sessionId && typeof sessionId === 'string') {
-    const existing = sessionStore.getSession(sessionId)
-    if (existing) {
-      sessionStore.updateSession(sessionId, { user, token })
-    } else {
-      sessionStore.sessions.set(sessionId, {
-        sessionId,
-        token: token || null,
-        user: user || null,
-        userId: user?.login || null,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + sessionStore.SESSION_TTL_MS,
+authRouter.post('/auth/session', async (req, res) => {
+  const { sessionId, token } = req.body
+
+  // If token is provided, verify it directly with GitHub API before creating/updating session
+  if (token && typeof token === 'string' && token.trim().length > 5) {
+    try {
+      const cleanToken = token.trim()
+      const uRes = await fetch('https://api.github.com/user', {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${cleanToken}`,
+          'User-Agent': 'CodeGenome-AI',
+        },
       })
-      sessionStore.save()
+
+      if (!uRes.ok) {
+        return res.status(401).json({ error: 'Invalid GitHub token. Verification failed.' })
+      }
+
+      const verifiedUser = await uRes.json()
+      const verifiedUserData = {
+        id: verifiedUser.id || null,
+        login: verifiedUser.login,
+        name: verifiedUser.name || verifiedUser.login,
+        avatar_url: verifiedUser.avatar_url,
+        html_url: verifiedUser.html_url,
+      }
+      const canonicalUserId = verifiedUser.id ? `gh_${verifiedUser.id}` : verifiedUser.login
+
+      if (sessionId && typeof sessionId === 'string' && sessionStore.getSession(sessionId)) {
+        sessionStore.updateSession(sessionId, {
+          token: cleanToken,
+          user: verifiedUserData,
+          userId: canonicalUserId,
+        })
+        return res.json({ success: true, sessionId })
+      } else {
+        const session = sessionStore.createSession({
+          token: cleanToken,
+          user: verifiedUserData,
+          userId: canonicalUserId,
+        })
+        return res.json({ success: true, sessionId: session.sessionId })
+      }
+    } catch {
+      return res.status(500).json({ error: 'Failed to verify token with GitHub.' })
     }
   }
-  res.json({ success: true })
+
+  // If a valid existing session ID is supplied without a new token, verify it exists
+  if (sessionId && typeof sessionId === 'string' && sessionStore.getSession(sessionId)) {
+    return res.json({ success: true, sessionId })
+  }
+
+  // Reject unverified attempts to forge or inject arbitrary user identities
+  return res.status(400).json({
+    error: 'Authentication failed. Sessions cannot be registered without verified credentials.',
+    code: 'INVALID_CREDENTIALS'
+  })
 })
 
 /**
@@ -208,7 +254,7 @@ authRouter.post('/auth/session', (req, res) => {
  */
 authRouter.get('/auth/repos', async (req, res) => {
   const authUser = resolveAuthenticatedUser(req)
-  let token = authUser?.token || process.env.GITHUB_TOKEN || null
+  let token = authUser?.token || null
   let username = authUser?.user?.login || null
 
   if (token && (!username || username === 'developer')) {
@@ -227,8 +273,25 @@ authRouter.get('/auth/repos', async (req, res) => {
     } catch {}
   }
 
-  if (!username || username === 'developer') {
-    username = 'raghavacse2024-dotcom'
+  if (!token && !username) {
+    if (process.env.DEMO_MODE === 'true') {
+      return res.json({
+        repositories: [
+          {
+            name: 'sample-express-app',
+            fullName: 'demo/sample-express-app',
+            owner: 'demo',
+            private: false,
+            url: 'https://github.com/demo/sample-express-app',
+            description: 'Demo mode repository for architectural debt and refactor demonstration',
+            language: 'TypeScript',
+            stars: 10,
+            updatedAt: new Date().toISOString(),
+          }
+        ]
+      })
+    }
+    return res.json({ repositories: [] })
   }
 
   const repoMap = new Map()
@@ -307,20 +370,26 @@ authRouter.get('/auth/repos', async (req, res) => {
     console.warn('[Server] Error fetching GitHub repos:', err.message)
   }
 
-  const fallbackRepos = [
-    {
-      name: 'codegenome-ai',
-      fullName: `${username}/codegenome-ai`,
-      owner: username,
-      private: false,
-      url: `https://github.com/${username}/codegenome-ai`,
-      description: 'Multi-agent repository intelligence network for code architecture analysis and technical debt pricing',
-      language: 'TypeScript',
-      stars: 42,
-      updatedAt: new Date().toISOString(),
-    },
-  ]
-  res.json({ repositories: fallbackRepos })
+  // Explicit demo mode check - never silently activate personal repository fallback
+  if (process.env.DEMO_MODE === 'true') {
+    return res.json({
+      repositories: [
+        {
+          name: 'sample-express-app',
+          fullName: 'demo/sample-express-app',
+          owner: 'demo',
+          private: false,
+          url: 'https://github.com/demo/sample-express-app',
+          description: 'Demo mode repository for architectural debt and refactor demonstration',
+          language: 'TypeScript',
+          stars: 10,
+          updatedAt: new Date().toISOString(),
+        }
+      ]
+    })
+  }
+
+  res.json({ repositories: [] })
 })
 
 /**

@@ -48,7 +48,7 @@ const headers = (customToken) => {
   return {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'CodeGenomeAI-App/1.0 (+https://github.com/raghavacse2024-dotcom/codegenome-ai)',
+    'User-Agent': 'CodeGenomeAI-App/1.0',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }
 }
@@ -64,9 +64,9 @@ function computeSamplingMetadata({
   const skippedFileCount = Math.max(0, repositoryFileCount - analyzedFileCount)
   const totalAnalyzedBytes = analyzedFiles.reduce((acc, f) => acc + (f.size || f.content?.length || 0), 0)
   const coverageRatio = repositoryFileCount > 0 ? (analyzedFileCount / repositoryFileCount) : 1
-  const analysisCoverage = `${Math.min(100, Math.round(coverageRatio * 100))}%`
+  const analysisCoverage = samplingUsed ? `${Math.min(99, Math.round(coverageRatio * 100))}%` : '100%'
   const samplingNotice = samplingUsed
-    ? `Analysis based on ${analyzedFileCount} sampled source files (${analysisCoverage} coverage of ${repositoryFileCount} files in repository).`
+    ? `Analysis is based on a sampled subset of repository files (${analyzedFileCount} of ${repositoryFileCount} files analyzed, ${analysisCoverage} coverage).`
     : `Complete analysis of all ${analyzedFileCount} detected source files in repository.`
 
   return {
@@ -88,8 +88,12 @@ function fallbackRepository(owner, repository, reason) {
     totalFiles: demo.files.length,
     limit: 25,
   })
+  metadata.samplingNotice = 'Analysis is based on a sampled subset of repository files.'
+  metadata.analysisCoverage = 'sampled'
   return {
     ...demo,
+    source: 'demo',
+    mode: 'demo',
     metadata,
   }
 }
@@ -163,6 +167,8 @@ async function fetchRepositoryArchive(owner, repository, customToken) {
           structure: buildStructure(files),
           truncated: totalFiles > files.length,
           metadata,
+          source: 'github-archive',
+          mode: 'live',
         }
       }
       lastFailure = new Error(`GitHub archive for ${branch} did not contain supported source files.`)
@@ -246,6 +252,8 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
       structure: buildStructure(sampledFiles), 
       truncated: totalFiles > sampledFiles.length,
       metadata: samplingMeta,
+      source: 'github-api',
+      mode: 'live',
     }
 
     if (!isTesting) {

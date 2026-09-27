@@ -24,9 +24,8 @@ import {
 } from 'lucide-react'
 
 const EXAMPLE_REPOS = [
-  'https://github.com/raghavacse2024-dotcom/codegenome-ai',
-  'https://github.com/facebook/react',
   'https://github.com/expressjs/express',
+  'https://github.com/facebook/react',
   'https://github.com/vercel/next.js',
   'https://github.com/tailwindlabs/tailwindcss',
   'https://github.com/astral-sh/uv'
@@ -295,7 +294,7 @@ export function HomePage({ onLaunchCockpit }: HomePageProps) {
 
             <div className="home-visual-body">
               <div className="home-visual-stream">
-                <p className="code-line text-muted">$ codegenome scan https://github.com/raghavacse2024-dotcom/codegenome-ai</p>
+                <p className="code-line text-muted">$ codegenome scan https://github.com/expressjs/express</p>
                 <p className="code-line text-neon">[0.0s] Initializing 5 execution agents...</p>
                 <p className="code-line text-cyan">[1.2s] ArchitectureAgent: Mapped 4 modules, 18 dependency nodes</p>
                 <p className="code-line text-amber-300">[2.5s] TechnicalDebtAgent: Calculated debt index (Score 78/100 - $14,200)</p>
@@ -922,13 +921,13 @@ export function compileAST(node: ASTNode): Result {
           </div>
           <div className="home-footer-links flex items-center gap-4">
             <a
-              href="https://github.com/raghavacse2024-dotcom/codegenome-ai"
+              href="https://github.com/codegenome-ai/codegenome"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-muted hover:text-neon transition-colors flex items-center gap-1.5"
             >
               <GitBranch className="w-3.5 h-3.5 text-neon" />
-              <span>github.com/raghavacse2024-dotcom/codegenome-ai</span>
+              <span>github.com/codegenome-ai/codegenome</span>
             </a>
           </div>
         </div>

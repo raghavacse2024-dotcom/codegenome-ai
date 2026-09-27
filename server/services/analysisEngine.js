@@ -25,27 +25,35 @@ export async function analyzeRepository(repositoryUrl, token = null, onProgress 
     result.results.refactor.data.scaffolds = generated.files
     result.results.refactor.data.refactoredTarget = generated.refactoredTargetContent
     result.results.refactor.data.diff = generated.diff
+
+    const analyzedCount = repository.files?.length || 0
+    const repoCount = repository.metadata?.repositoryFileCount || analyzedCount
+    const isFullRepo = repoCount > 0 && repoCount === analyzedCount
+
     result.metadata = repository.metadata || {
-      analyzedFileCount: repository.files?.length || 0,
-      repositoryFileCount: repository.files?.length || 0,
-      samplingUsed: false,
+      analyzedFileCount: analyzedCount,
+      repositoryFileCount: repoCount,
+      samplingUsed: !isFullRepo,
       samplingLimit: 25,
-      skippedFileCount: 0,
+      skippedFileCount: Math.max(0, repoCount - analyzedCount),
       totalAnalyzedBytes: (repository.files || []).reduce((acc, f) => acc + (f.size || f.content?.length || 0), 0),
-      analysisCoverage: '100%',
-      samplingNotice: `Analysis based on ${repository.files?.length || 0} source files.`
+      analysisCoverage: isFullRepo ? '100%' : (repoCount > 0 ? `${Math.round((analyzedCount / repoCount) * 100)}%` : 'sampled'),
+      samplingNotice: isFullRepo
+        ? `Analysis of ${analyzedCount} files in repository.`
+        : `Analysis is based on a sampled subset of ${analyzedCount} repository files.`
     }
     return result
   }, 60_000)
 
-  const isUserAuthenticated = Boolean(token && String(token).trim().length > 0)
-  const isLive = analysis.source === 'live' || isUserAuthenticated
+  // Real repository source strictly determines mode — never assume live solely from token or user auth
+  const actualSource = analysis.source || (analysis.fallbackReason ? 'demo' : 'github-api')
+  const isLive = (actualSource === 'github-api' || actualSource === 'github-archive') && !analysis.fallbackReason
 
   return {
     ...analysis,
     isDemo: !isLive,
     mode: isLive ? 'live' : 'demo',
-    source: isLive ? 'live' : 'demo-safe',
+    source: isLive ? actualSource : 'demo',
   }
 }
 
