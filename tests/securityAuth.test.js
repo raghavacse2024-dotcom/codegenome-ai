@@ -2,11 +2,14 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import express from 'express'
 import http from 'node:http'
 import fs from 'node:fs'
-import { sessionStore } from '../server/services/sessionStore.js'
+import { sessionStore, encryptToken, decryptToken } from '../server/services/sessionStore.js'
 import { saveAnalysis } from '../server/services/analysisStore.js'
 import { analyzeRouter } from '../server/routes/analyze.js'
 import { prRouter } from '../server/routes/pr.js'
+import { downloadRouter } from '../server/routes/download.js'
+import { qaRouter } from '../server/routes/qa.js'
 import { errorHandler } from '../server/middleware/errorHandler.js'
+import { resolveAuthenticatedUser } from '../server/services/authResolver.js'
 
 describe('Security: Authentication & Session Management', () => {
   it('generates cryptographically secure OAuth states and prevents reuse', () => {
@@ -65,6 +68,44 @@ describe('Security: Authentication & Session Management', () => {
       expect(stored.token).toMatch(/^[a-f0-9]{24}:[a-f0-9]{32}:[a-f0-9]+$/)
     }
   })
+
+  it('handles invalid decryption payloads safely without throwing crashes', () => {
+    expect(decryptToken('invalid:payload')).toBeNull()
+    expect(decryptToken('malformed_hex_iv:tag:data')).toBeNull()
+  })
+
+  it('authenticates valid Firebase ID tokens and rejects invalid/expired tokens', async () => {
+    // 1. Valid Firebase token
+    const validReq = {
+      headers: { authorization: 'Bearer test_firebase_token_firebase_user_123' },
+    }
+    const validUser = await resolveAuthenticatedUser(validReq)
+    expect(validUser).toBeDefined()
+    expect(validUser.authenticated).toBe(true)
+    expect(validUser.userId).toBe('firebase_user_123')
+    expect(validUser.firebaseUid).toBe('firebase_user_123')
+
+    // 2. Expired Firebase token -> returns null (401 unauthenticated)
+    const expiredReq = {
+      headers: { authorization: 'Bearer test_firebase_token_expired_999' },
+    }
+    const expiredUser = await resolveAuthenticatedUser(expiredReq)
+    expect(expiredUser).toBeNull()
+
+    // 3. Invalid / tampered Firebase token -> returns null
+    const invalidReq = {
+      headers: { authorization: 'Bearer test_firebase_token_invalid_bad' },
+    }
+    const invalidUser = await resolveAuthenticatedUser(invalidReq)
+    expect(invalidUser).toBeNull()
+
+    // 4. Spoofed X-Firebase-UID header alone without token MUST BE REJECTED (returns null)
+    const spoofedReq = {
+      headers: { 'x-firebase-uid': 'attacker_impersonated_victim_uid' },
+    }
+    const spoofedUser = await resolveAuthenticatedUser(spoofedReq)
+    expect(spoofedUser).toBeNull()
+  })
 })
 
 describe('Security: Access Control & Analysis Ownership Verification', () => {
@@ -72,6 +113,8 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
   app.use(express.json())
   app.use('/api', analyzeRouter)
   app.use('/api', prRouter)
+  app.use('/api', downloadRouter)
+  app.use('/api', qaRouter)
   app.use(errorHandler)
 
   let server
@@ -137,6 +180,13 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
     expect(data.code).toBe('UNAUTHORIZED')
   })
 
+  it('returns 401 when spoofed x-firebase-uid is used without valid token', async () => {
+    const res = await fetch(`${baseUrl}/api/analysis/${ownerAnalysisId}`, {
+      headers: { 'x-firebase-uid': 'alice_owner' },
+    })
+    expect(res.status).toBe(401)
+  })
+
   it('returns 404 when requested analysis does not exist', async () => {
     const res = await fetch(`${baseUrl}/api/analysis/non-existent-analysis-id`, {
       headers: { Authorization: `Bearer ${ownerSessionId}` },
@@ -153,6 +203,46 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
     const data = await res.json()
     expect(res.status).toBe(403)
     expect(data.code).toBe('FORBIDDEN')
+  })
+
+  it('prevents User B from downloading User A analysis scaffolds (returns 403 Forbidden)', async () => {
+    const res = await fetch(`${baseUrl}/api/download`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${attackerSessionId}`,
+      },
+      body: JSON.stringify({ analysisId: ownerAnalysisId }),
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it('allows User A to download own analysis scaffolds (returns 200 ZIP)', async () => {
+    const res = await fetch(`${baseUrl}/api/download`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${ownerSessionId}`,
+      },
+      body: JSON.stringify({ analysisId: ownerAnalysisId }),
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/zip')
+  })
+
+  it('prevents User B from asking QA on User A analysis (returns 403 Forbidden)', async () => {
+    const res = await fetch(`${baseUrl}/api/qa`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${attackerSessionId}`,
+      },
+      body: JSON.stringify({
+        analysisId: ownerAnalysisId,
+        question: 'What is the architectural debt?',
+      }),
+    })
+    expect(res.status).toBe(403)
   })
 
   it('prevents User B from validating User A refactor (POST /api/pr/validate returns 403 Forbidden)', async () => {

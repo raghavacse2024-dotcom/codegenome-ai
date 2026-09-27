@@ -34,8 +34,12 @@ export async function analyzeRepository(repositoryUrl, token = null, onProgress 
       targetPath,
       refactoredTarget: generated.refactoredTargetContent,
       baseFiles: repository.files || [],
+      policyFiles: repository.policyFiles || [],
       patch: generated.diff?.rawPatch || '',
     })
+
+    result.files = repository.files || []
+    result.policyFiles = repository.policyFiles || []
 
     result.results.refactor.data.state = validationResult.state
     result.results.refactor.data.validation = validationResult.validation

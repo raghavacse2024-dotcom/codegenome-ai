@@ -205,6 +205,7 @@ export async function runAnalysis(repository, onProgress = null) {
     targetPath: target.path,
     refactoredTarget,
     baseFiles: files,
+    policyFiles: repository.policyFiles || [],
     patch: diff?.rawPatch || '',
   })
 

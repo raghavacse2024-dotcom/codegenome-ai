@@ -42,19 +42,40 @@ export function setGitHubPat(pat: string | null) {
 }
 
 /**
+ * Helper to build verified authentication headers for API requests.
+ * Uses Firebase ID tokens (cryptographically verified on backend) or CodeGenome session tokens.
+ */
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  const sessionToken = getSessionToken()
+  const pat = getGitHubPat()
+  let fbToken: string | null = null
+  if (auth?.currentUser) {
+    try {
+      fbToken = await auth.currentUser.getIdToken()
+    } catch {}
+  }
+
+  const headers: Record<string, string> = {}
+  if (fbToken) {
+    headers['Authorization'] = `Bearer ${fbToken}`
+  } else if (sessionToken) {
+    headers['Authorization'] = `Bearer ${sessionToken}`
+  }
+
+  if (pat) {
+    headers['X-GitHub-Token'] = pat
+  }
+
+  return headers
+}
+
+/**
  * Runs a fetch request with a browser-side timeout, auth token header, and user-friendly errors.
  */
 async function request<T>(path: string, init: RequestInit, timeoutMs = 60_000): Promise<T> {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
-  const token = getSessionToken()
-  const pat = getGitHubPat()
-  const fbUid = auth?.currentUser?.uid
-  const authHeaders: Record<string, string> = {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(pat ? { 'X-GitHub-Token': pat } : {}),
-    ...(fbUid ? { 'X-Firebase-UID': fbUid } : {}),
-  }
+  const authHeaders = await getAuthHeaders()
 
   try {
     const response = await fetch(`${API_URL}${path}`, {
@@ -335,21 +356,9 @@ export function registerSession(sessionId: string, user?: GitHubUser, token?: st
 /**
  * Fetches repositories accessible to the logged in user (including private)
  */
-export function getUserRepositories(username?: string) {
-  let login = username
-  if (!login) {
-    try {
-      const cached = localStorage.getItem('codegenome_github_user')
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        login = parsed.login
-      }
-    } catch {}
-  }
-  const query = login ? `?username=${encodeURIComponent(login)}` : ''
-  return request<{ repositories: UserRepo[] }>(`/api/auth/repos${query}`, {
+export function getUserRepositories() {
+  return request<{ repositories: UserRepo[] }>('/api/auth/repos', {
     method: 'GET',
-    headers: login ? { 'X-GitHub-User': login } : {},
   })
 }
 
@@ -374,10 +383,15 @@ export async function logoutUser() {
 export async function downloadScaffolds(analysisId: string) {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 60_000)
+  const authHeaders = await getAuthHeaders()
+
   try {
     const response = await fetch(`${API_URL}/api/download`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
       body: JSON.stringify({ analysisId }),
       signal: controller.signal,
     })
@@ -422,22 +436,8 @@ export function askQuestion(
  * Retrieves past repository scan history stored in persistent database.
  */
 export function getAnalysisHistory(): Promise<{ analyses: Analysis[] }> {
-  const cached = localStorage.getItem('codegenome_github_user')
-  let username: string | undefined
-  try {
-    if (cached) {
-      username = JSON.parse(cached)?.login
-    }
-  } catch {}
-
-  const headers: Record<string, string> = {}
-  if (username) {
-    headers['X-GitHub-User'] = username
-  }
-
   return request<{ analyses: Analysis[] }>('/api/history', {
     method: 'GET',
-    headers,
   })
 }
 
@@ -445,22 +445,8 @@ export function getAnalysisHistory(): Promise<{ analyses: Analysis[] }> {
  * Clears all persistent repository scan history for the authenticated user from Firestore.
  */
 export function clearAnalysisHistory(): Promise<{ success: boolean }> {
-  const cached = localStorage.getItem('codegenome_github_user')
-  let username: string | undefined
-  try {
-    if (cached) {
-      username = JSON.parse(cached)?.login
-    }
-  } catch {}
-
-  const headers: Record<string, string> = {}
-  if (username) {
-    headers['X-GitHub-User'] = username
-  }
-
   return request<{ success: boolean }>('/api/history', {
     method: 'DELETE',
-    headers,
   })
 }
 
@@ -484,21 +470,11 @@ export function createAutomatedPullRequest(params: {
   baseBranch?: string
   confirmedHighRisk?: boolean
 }): Promise<import('../types').PullRequestResult> {
-  const token = getSessionToken()
-  const githubPat = getGitHubPat()
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-  if (githubPat) {
-    headers['X-GitHub-Token'] = githubPat
-  }
-
   return request<import('../types').PullRequestResult>('/api/pr/create', {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(params),
   })
 }
@@ -506,14 +482,24 @@ export function createAutomatedPullRequest(params: {
 /**
  * Downloads raw unified .patch file for the refactor package.
  */
-export function downloadGitPatch(analysisId: string) {
-  const url = `${API_URL}/api/pr/patch/${analysisId}?download=true`
+export async function downloadGitPatch(analysisId: string) {
+  const authHeaders = await getAuthHeaders()
+  const response = await fetch(`${API_URL}/api/pr/patch/${analysisId}?download=true`, {
+    headers: authHeaders,
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ error: 'Patch download failed' }))
+    throw new Error(payload.error || 'Patch download failed')
+  }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = 'codegenome-refactor.patch'
   document.body.appendChild(anchor)
   anchor.click()
   document.body.removeChild(anchor)
+  URL.revokeObjectURL(url)
 }
 
 

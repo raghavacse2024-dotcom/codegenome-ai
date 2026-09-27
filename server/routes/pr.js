@@ -23,7 +23,7 @@ const CreatePrSchema = z.object({
  */
 prRouter.post('/pr/validate', async (req, res, next) => {
   try {
-    const authUser = resolveAuthenticatedUser(req)
+    const authUser = await resolveAuthenticatedUser(req)
     if (!authUser) {
       return res.status(401).json({ error: 'Authentication required to validate refactor.', code: 'UNAUTHORIZED' })
     }
@@ -51,6 +51,7 @@ prRouter.post('/pr/validate', async (req, res, next) => {
       targetPath,
       refactoredTarget,
       baseFiles: analysis.files || [],
+      policyFiles: analysis.policyFiles || [],
       patch: refactorData.diff?.rawPatch || '',
       confirmedHighRisk: Boolean(req.body.confirmedHighRisk),
     })
@@ -75,7 +76,7 @@ prRouter.post('/pr/validate', async (req, res, next) => {
  */
 prRouter.post('/pr/create', async (req, res, next) => {
   try {
-    const authUser = resolveAuthenticatedUser(req)
+    const authUser = await resolveAuthenticatedUser(req)
     if (!authUser) {
       return res.status(401).json({ error: 'Authentication required to create a Pull Request.', code: 'UNAUTHORIZED' })
     }
@@ -140,6 +141,7 @@ prRouter.post('/pr/create', async (req, res, next) => {
       body,
       files: filesToCommit,
       baseFiles: analysis.files || [],
+      policyFiles: analysis.policyFiles || [],
       patch: rawPatch,
       token,
       user,
@@ -168,7 +170,7 @@ prRouter.post('/pr/create', async (req, res, next) => {
  */
 prRouter.get('/pr/patch/:analysisId', async (req, res, next) => {
   try {
-    const authUser = resolveAuthenticatedUser(req)
+    const authUser = await resolveAuthenticatedUser(req)
     if (!authUser) {
       return res.status(401).json({ error: 'Authentication required to view patch.', code: 'UNAUTHORIZED' })
     }

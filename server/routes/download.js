@@ -14,7 +14,7 @@ async function handleDownload(rawId, request, response, next) {
     }
     const { analysisId } = parseResult.data
 
-    const authUser = resolveAuthenticatedUser(request)
+    const authUser = await resolveAuthenticatedUser(request)
     const analysis = await getAnalysis(analysisId)
     if (!analysis) {
       return response.status(404).json({ error: 'Analysis not found. Run analysis again before downloading.', code: 'NOT_FOUND' })

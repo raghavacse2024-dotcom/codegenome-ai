@@ -30,8 +30,11 @@ describe('calculator', () => {
     expect(result.validation.safeToPropose).toBe(true)
     expect(result.validation.lint).toBe('passed')
     expect(result.validation.typecheck).toBe('passed')
-    expect(result.validation.build).toBe('passed')
-    expect(result.validation.tests).toBe('passed')
+    expect(result.validation.syntaxValidation).toBe('passed')
+    expect(result.validation.staticValidation).toBe('passed')
+    expect(result.validation.testFrameworkValidation).toBe('passed')
+    expect(result.validation.tests).toBe('not_executed')
+    expect(result.validation.build).toBe('not_executed')
     expect(result.failedStep).toBeNull()
   })
 
@@ -102,7 +105,37 @@ class TestCalculator(unittest.TestCase):
     expect(result.state).toBe('PR_ELIGIBLE')
     expect(result.validation.safeToPropose).toBe(true)
     expect(result.validation.lint).toBe('passed')
-    expect(result.validation.tests).toBe('passed')
+    expect(result.validation.syntaxValidation).toBe('passed')
+    expect(result.validation.testFrameworkValidation).toBe('passed')
+    expect(result.validation.tests).toBe('not_executed')
+  })
+
+  it('detects AGENTS.md in policyFiles even when policyFiles is not part of baseFiles', async () => {
+    const files = [
+      {
+        path: 'src/main.ts',
+        content: 'export const main = () => 1;',
+      },
+    ]
+
+    const baseFiles = [
+      { path: 'src/main.ts', content: 'export const main = () => 1;' },
+    ]
+
+    const policyFiles = [
+      { path: 'AGENTS.md', content: 'No automated pull requests or bot contributions allowed.' },
+    ]
+
+    const result = await validateRefactor({
+      files,
+      targetPath: 'src/main.ts',
+      baseFiles,
+      policyFiles,
+    })
+
+    expect(result.policy.isBlocked).toBe(true)
+    expect(result.state).toBe('PR_BLOCKED')
+    expect(result.policy.policyFile).toBe('AGENTS.md')
   })
 
   it('rejects Python refactor with invalid syntax in generated module', async () => {

@@ -12,7 +12,7 @@ analyzeRouter.post('/analyze', analyzeRateLimiter, async (request, response, nex
     const { repositoryUrl } = AnalyzeRequestSchema.parse(request.body)
     
     // Resolve user token from Authorization header or active session
-    const authUser = resolveAuthenticatedUser(request)
+    const authUser = await resolveAuthenticatedUser(request)
     const userId = authUser?.userId || null
     const userToken = authUser?.token || null
 
@@ -57,7 +57,7 @@ async function handleAnalyzeStream(request, response, next) {
     const { repositoryUrl } = AnalyzeRequestSchema.parse({ repositoryUrl: rawUrl })
 
     // Resolve user from Authorization header or query token
-    const authUser = resolveAuthenticatedUser(request)
+    const authUser = await resolveAuthenticatedUser(request)
     const userId = authUser?.userId || null
     const userToken = authUser?.token || null
 
@@ -90,7 +90,7 @@ analyzeRouter.post('/analyze/stream', analyzeRateLimiter, handleAnalyzeStream)
 // Persistent database endpoint: list recent repository scans for authenticated user only
 analyzeRouter.get('/history', async (request, response, next) => {
   try {
-    const authUser = resolveAuthenticatedUser(request)
+    const authUser = await resolveAuthenticatedUser(request)
     if (!authUser || !authUser.userId) {
       return response.json({ analyses: [] })
     }
@@ -105,7 +105,7 @@ analyzeRouter.get('/history', async (request, response, next) => {
 // Clear persistent scan history for authenticated user only
 analyzeRouter.delete('/history', async (request, response, next) => {
   try {
-    const authUser = resolveAuthenticatedUser(request)
+    const authUser = await resolveAuthenticatedUser(request)
     if (!authUser || !authUser.userId) {
       return response.status(401).json({ error: 'Authentication required to clear analysis history.', code: 'UNAUTHORIZED' })
     }
@@ -127,7 +127,7 @@ analyzeRouter.delete('/history', async (request, response, next) => {
  */
 analyzeRouter.get('/analysis/:id', async (request, response, next) => {
   try {
-    const authUser = resolveAuthenticatedUser(request)
+    const authUser = await resolveAuthenticatedUser(request)
     if (!authUser) {
       return response.status(401).json({
         error: 'Authentication required to access analysis records.',

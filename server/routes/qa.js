@@ -28,11 +28,12 @@ qaRouter.post('/qa', qaRateLimiter, async (request, response, next) => {
     const { analysisId, question, history } = QaRequestSchema.parse(request.body)
     let analysis = null
     if (analysisId && analysisId.trim()) {
-      analysis = await getAnalysis(analysisId)
-      if (analysis) {
-        const authUser = resolveAuthenticatedUser(request)
-        assertAnalysisOwnership(analysis, authUser)
+      analysis = await getAnalysis(analysisId.trim())
+      if (!analysis) {
+        return response.status(404).json({ error: `Analysis with ID '${analysisId}' not found.`, code: 'NOT_FOUND' })
       }
+      const authUser = await resolveAuthenticatedUser(request)
+      assertAnalysisOwnership(analysis, authUser)
     }
     if (!analysis) {
       analysis = {

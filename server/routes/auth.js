@@ -135,7 +135,7 @@ authRouter.post('/auth/github/token', async (req, res) => {
  * Arbitrary client headers like x-github-user are NOT accepted as proof of identity.
  */
 authRouter.get('/auth/user', async (req, res) => {
-  const authUser = resolveAuthenticatedUser(req)
+  const authUser = await resolveAuthenticatedUser(req)
   if (!authUser || !authUser.user) {
     return res.json({ authenticated: false, user: null })
   }
@@ -253,7 +253,7 @@ authRouter.post('/auth/session', async (req, res) => {
  * Returns list of repositories accessible to the authenticated user.
  */
 authRouter.get('/auth/repos', async (req, res) => {
-  const authUser = resolveAuthenticatedUser(req)
+  const authUser = await resolveAuthenticatedUser(req)
   let token = authUser?.token || null
   let username = authUser?.user?.login || null
 

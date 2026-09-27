@@ -51,6 +51,7 @@ export async function validateRefactor({
   targetPath = null,
   refactoredTarget = null,
   baseFiles = [],
+  policyFiles = [],
   patch = '',
   confirmedHighRisk = false,
 }) {
@@ -310,7 +311,7 @@ export async function validateRefactor({
   })
 
   // 8. Stage 6: Repository Contribution Policy Check (AGENTS.md / CONTRIBUTING.md)
-  const policy = inspectContributionPolicy(baseFiles)
+  const policy = inspectContributionPolicy(policyFiles && policyFiles.length > 0 ? policyFiles : baseFiles)
   if (policy.isBlocked) {
     policyPassed = false
     logs.policy += `[Policy] ⚠️ PR Blocked by repository maintainer policy in '${policy.policyFile}': ${policy.ruleSnippet}\n`
@@ -341,8 +342,8 @@ export async function validateRefactor({
     { step: 'refactor_generation', name: 'Refactor Generation', status: 'passed', details: `${allFiles.length} files generated` },
     { step: 'syntax_validation', name: 'Syntax Validation', status: lintPassed ? 'passed' : 'failed' },
     { step: 'import_validation', name: 'Dependency & Import Validation', status: typecheckPassed ? 'passed' : 'failed' },
-    { step: 'test_framework_validation', name: 'Test-Framework Validation', status: testsPassed ? 'passed' : 'failed', details: expectedTestFramework },
-    { step: 'generated_code_validation', name: 'Generated-Code Validation', status: buildPassed ? 'passed' : 'failed' },
+    { step: 'test_framework_validation', name: 'Test-Framework Compatibility', status: testsPassed ? 'passed' : 'failed', details: expectedTestFramework },
+    { step: 'generated_code_validation', name: 'Generated-Code Static Validation', status: buildPassed ? 'passed' : 'failed' },
     { step: 'security_checks', name: 'Security & Secret Checks', status: guardrails.passed ? 'passed' : (guardrails.isHighRisk ? 'review_required' : 'failed') },
     { step: 'repository_policy', name: 'Repository Contribution Policy', status: !policy.isBlocked ? 'passed' : 'blocked', details: policy.policyFile },
     { step: 'human_approval', name: 'Explicit Human Approval', status: state === 'PR_ELIGIBLE' ? 'ready' : (state === 'HUMAN_REVIEW_REQUIRED' ? 'required' : 'blocked') },
@@ -361,9 +362,15 @@ export async function validateRefactor({
     validation: {
       lint: lintPassed ? 'passed' : 'failed',
       typecheck: typecheckPassed ? 'passed' : 'failed',
-      build: buildPassed ? 'passed' : 'failed',
-      tests: testsPassed ? 'passed' : 'failed',
+      build: buildPassed ? 'not_executed' : 'failed',
+      tests: testsPassed ? 'not_executed' : 'failed',
       policy: policyPassed ? 'passed' : 'failed',
+      syntaxValidation: lintPassed ? 'passed' : 'failed',
+      dependencyValidation: typecheckPassed ? 'passed' : 'failed',
+      staticValidation: (lintPassed && typecheckPassed) ? 'passed' : 'failed',
+      testFrameworkValidation: testsPassed ? 'passed' : 'failed',
+      securityValidation: guardrails.passed ? 'passed' : 'failed',
+      policyValidation: !policy.isBlocked ? 'passed' : 'blocked',
       safeToPropose,
     },
     guardrails,

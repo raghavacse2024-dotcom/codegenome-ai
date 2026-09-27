@@ -1,9 +1,10 @@
 import { sessionStore } from './sessionStore.js'
+import { verifyFirebaseIdToken } from './firebaseAdmin.js'
 
 /**
  * Resolves a stable canonical application user ID.
  * Priority:
- * 1. Verified Firebase Auth UID
+ * 1. Verified Firebase Auth UID (primary application ownership)
  * 2. Session canonical userId
  * 3. GitHub numeric user ID (e.g. "gh_1234567")
  * 4. GitHub login identifier
@@ -23,27 +24,41 @@ export function getCanonicalUserId(identity) {
   if (identity.userId) {
     return String(identity.userId).trim()
   }
-  if (identity.user?.id || identity.id) {
-    return `gh_${identity.user?.id || identity.id}`
+  if (identity.githubUserId || identity.user?.id || identity.id) {
+    return `gh_${identity.githubUserId || identity.user?.id || identity.id}`
   }
-  if (identity.user?.login || identity.login) {
-    return String(identity.user?.login || identity.login).trim()
+  if (identity.githubLogin || identity.user?.login || identity.login) {
+    return String(identity.githubLogin || identity.user?.login || identity.login).trim()
   }
   return null
 }
 
 /**
  * Resolves the authenticated user from Express request headers.
- * Identity is derived exclusively from validated session IDs or authenticated Bearer tokens.
- * Client-provided identity headers (e.g. x-github-user) are NEVER trusted as proof of ownership.
+ * Identity is derived exclusively from verified Firebase ID tokens, validated session IDs,
+ * or authenticated GitHub tokens.
+ *
+ * SECURITY: Client-provided identity headers (e.g. x-firebase-uid, x-github-user)
+ * are NEVER trusted as proof of authentication or ownership.
  *
  * @param {import('express').Request} req
- * @returns {{ userId: string, user: object, token: string | null, sessionId: string | null } | null}
+ * @returns {Promise<{
+ *   authenticated: boolean,
+ *   userId: string,
+ *   firebaseUid: string | null,
+ *   githubUserId: string | null,
+ *   githubLogin: string | null,
+ *   user: object,
+ *   token: string | null,
+ *   sessionId: string | null,
+ *   provider: 'firebase' | 'github_session' | 'github_pat'
+ * } | null>}
  */
-export function resolveAuthenticatedUser(req) {
+export async function resolveAuthenticatedUser(req) {
+  if (!req || !req.headers) return null
+
   const authHeader = req.headers.authorization
   const customPat = req.headers['x-github-token']
-  const firebaseUidHeader = req.headers['x-firebase-uid']
 
   let candidate = null
   if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
@@ -52,67 +67,106 @@ export function resolveAuthenticatedUser(req) {
     candidate = req.query.token.trim()
   }
 
-  // 1. Session ID lookup
-  if (candidate && candidate.startsWith('cg_')) {
+  // 1. Session ID lookup (CodeGenome GitHub session: cg_sess_...)
+  if (candidate && candidate.startsWith('cg_sess_')) {
     const session = sessionStore.getSession(candidate)
     if (session) {
-      const canonicalUserId = (firebaseUidHeader && typeof firebaseUidHeader === 'string' && firebaseUidHeader.trim())
-        ? firebaseUidHeader.trim()
-        : (session.userId || (session.user?.id ? `gh_${session.user.id}` : session.user?.login) || candidate)
+      const ghId = session.user?.id ? String(session.user.id) : null
+      const ghLogin = session.user?.login ? String(session.user.login) : null
+      const canonicalUserId = session.userId || (ghId ? `gh_${ghId}` : ghLogin) || candidate
 
       return {
+        authenticated: true,
         userId: canonicalUserId,
-        user: session.user,
+        firebaseUid: session.firebaseUid || null,
+        githubUserId: ghId,
+        githubLogin: ghLogin,
+        user: session.user || { login: ghLogin || 'developer' },
         token: session.token || null,
         sessionId: session.sessionId,
+        provider: 'github_session',
       }
     }
-    // Firebase auth Google session token format: cg_google_<uid>
-    if (candidate.startsWith('cg_google_')) {
-      const uid = candidate.slice(10).trim()
+    return null
+  }
+
+  // 2. Google/Firebase session alias (cg_google_<uid>)
+  if (candidate && candidate.startsWith('cg_google_')) {
+    const uid = candidate.slice(10).trim()
+    if (uid) {
       return {
+        authenticated: true,
         userId: uid,
+        firebaseUid: uid,
+        githubUserId: null,
+        githubLogin: null,
         user: { login: uid, name: 'Google User' },
         token: null,
         sessionId: candidate,
+        provider: 'firebase',
       }
+    }
+    return null
+  }
+
+  // 3. Firebase ID Token Verification (JWT or test token)
+  if (candidate && (candidate.includes('.') || candidate.startsWith('test_firebase_token_')) && !candidate.startsWith('ghp_')) {
+    try {
+      const verified = await verifyFirebaseIdToken(candidate)
+      if (verified && verified.uid) {
+        return {
+          authenticated: true,
+          userId: verified.uid,
+          firebaseUid: verified.uid,
+          githubUserId: null,
+          githubLogin: null,
+          user: { login: verified.email || verified.uid, name: verified.name || 'Firebase User', email: verified.email },
+          token: null,
+          sessionId: null,
+          provider: 'firebase',
+        }
+      }
+    } catch {
+      // Invalid or expired Firebase ID token -> caller will receive null / 401
+      return null
     }
   }
 
-  // 2. Direct PAT token check
+  // 4. GitHub PAT Token
   const directToken = customPat && typeof customPat === 'string' && customPat.trim().length > 5
     ? customPat.trim()
     : (candidate && !candidate.startsWith('cg_') && candidate.length > 5 ? candidate : null)
 
   if (directToken) {
-    // Check if any active session is mapped to this token
+    // Check if mapped to active session
     for (const session of sessionStore.sessions.values()) {
       if (session.token === directToken && session.userId) {
+        const ghId = session.user?.id ? String(session.user.id) : null
+        const ghLogin = session.user?.login ? String(session.user.login) : null
         return {
-          userId: (firebaseUidHeader && typeof firebaseUidHeader === 'string') ? firebaseUidHeader.trim() : session.userId,
-          user: session.user,
+          authenticated: true,
+          userId: session.userId,
+          firebaseUid: session.firebaseUid || null,
+          githubUserId: ghId,
+          githubLogin: ghLogin,
+          user: session.user || { login: ghLogin || 'developer' },
           token: session.token,
           sessionId: session.sessionId,
+          provider: 'github_pat',
         }
       }
     }
-    // If raw token is provided
+
     return {
-      userId: (firebaseUidHeader && typeof firebaseUidHeader === 'string') ? firebaseUidHeader.trim() : 'token_user',
+      authenticated: true,
+      userId: 'token_user',
+      firebaseUid: null,
+      githubUserId: null,
+      githubLogin: 'token_user',
       user: { login: 'token_user' },
       token: directToken,
       sessionId: null,
-    }
-  }
-
-  // 3. Authenticated Firebase UID header alone if present
-  if (firebaseUidHeader && typeof firebaseUidHeader === 'string' && firebaseUidHeader.trim().length > 0) {
-    const uid = firebaseUidHeader.trim()
-    return {
-      userId: uid,
-      user: { login: uid, name: 'Authenticated User' },
-      token: null,
-      sessionId: null,
+      provider: 'github_pat',
     }
   }
 
@@ -124,10 +178,10 @@ export function resolveAuthenticatedUser(req) {
  * Throws a 401 error if unauthenticated.
  *
  * @param {import('express').Request} req
- * @returns {{ userId: string, user: object, token: string | null, sessionId: string | null }}
+ * @returns {Promise<{ userId: string, user: object, token: string | null, sessionId: string | null }>}
  */
-export function requireAuthenticatedUser(req) {
-  const user = resolveAuthenticatedUser(req)
+export async function requireAuthenticatedUser(req) {
+  const user = await resolveAuthenticatedUser(req)
   if (!user || !user.userId) {
     const err = new Error('Authentication required to perform this action.')
     err.status = 401
@@ -163,12 +217,16 @@ export function assertAnalysisOwnership(analysis, user) {
   const currentUserId = String(user.userId).trim()
   const recordUserId = analysis.userId ? String(analysis.userId).trim() : null
   const userLogin = user.user?.login ? String(user.user.login).trim() : null
-  const ghId = user.user?.id ? `gh_${user.user.id}` : null
+  const userGithubLogin = user.githubLogin ? String(user.githubLogin).trim() : null
+  const userFbUid = user.firebaseUid ? String(user.firebaseUid).trim() : null
+  const ghId = user.user?.id || user.githubUserId ? `gh_${user.user?.id || user.githubUserId}` : null
 
   // If analysis has a registered owner, enforce strict match
   if (recordUserId) {
     const isOwner = (recordUserId === currentUserId) ||
+                    (userFbUid && recordUserId === userFbUid) ||
                     (userLogin && recordUserId === userLogin) ||
+                    (userGithubLogin && recordUserId === userGithubLogin) ||
                     (userLogin && recordUserId === `gh_${userLogin}`) ||
                     (ghId && recordUserId === ghId)
 

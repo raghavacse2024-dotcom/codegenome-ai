@@ -40,6 +40,7 @@ export async function createPullRequest({
   body,
   files = [],
   baseFiles = [],
+  policyFiles = [],
   patch = '',
   token = null,
   user = null,
@@ -85,6 +86,7 @@ export async function createPullRequest({
     targetPath,
     refactoredTarget,
     baseFiles,
+    policyFiles,
     patch,
     confirmedHighRisk,
   })

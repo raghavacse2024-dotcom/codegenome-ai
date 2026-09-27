@@ -5,7 +5,14 @@ import path from 'node:path'
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm'
 
 function getEncryptionKey() {
-  const secret = process.env.SESSION_ENCRYPTION_KEY || process.env.ENCRYPTION_SECRET || 'codegenome-session-key-salt-production-32b'
+  const secret = process.env.SESSION_ENCRYPTION_KEY || process.env.ENCRYPTION_SECRET
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Configuration error: SESSION_ENCRYPTION_KEY or ENCRYPTION_SECRET must be set in production.')
+    }
+    // Isolated local development & testing key (never used in production)
+    return crypto.scryptSync('codegenome-dev-test-encryption-key-local', 'codegenome-secure-token-salt', 32)
+  }
   return crypto.scryptSync(secret, 'codegenome-secure-token-salt', 32)
 }
 
@@ -87,9 +94,15 @@ class MemorySessionStore {
       if (fs.existsSync(this.filePath)) {
         const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf8'))
         const now = Date.now()
+        let migratedLegacyCount = 0
+
         for (const [id, record] of Object.entries(raw)) {
           if (record && (now - (record.createdAt || record.timestamp || 0) < this.SESSION_TTL_MS)) {
             // Decrypt token from disk into memory
+            const isLegacy = record.token && typeof record.token === 'string' && !record.token.includes(':')
+            if (isLegacy) {
+              migratedLegacyCount++
+            }
             const decryptedToken = decryptToken(record.token)
             this.sessions.set(id, {
               sessionId: id,
@@ -100,6 +113,11 @@ class MemorySessionStore {
               expiresAt: record.expiresAt || (now + this.SESSION_TTL_MS),
             })
           }
+        }
+
+        // If legacy unencrypted tokens existed on disk, encrypt and re-save immediately
+        if (migratedLegacyCount > 0) {
+          this.save()
         }
       }
     } catch (err) {

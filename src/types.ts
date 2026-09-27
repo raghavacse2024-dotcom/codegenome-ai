@@ -82,15 +82,21 @@ export type RefactorGitDiff = {
 }
 
 export type RefactorValidation = {
-  tests: 'passed' | 'failed' | 'skipped'
-  lint: 'passed' | 'failed' | 'skipped'
-  typecheck: 'passed' | 'failed' | 'skipped'
-  build: 'passed' | 'failed' | 'skipped'
-  policy?: 'passed' | 'failed' | 'skipped'
+  tests: 'passed' | 'failed' | 'skipped' | 'not_executed'
+  lint: 'passed' | 'failed' | 'skipped' | 'not_executed'
+  typecheck: 'passed' | 'failed' | 'skipped' | 'not_executed'
+  build: 'passed' | 'failed' | 'skipped' | 'not_executed'
+  policy?: 'passed' | 'failed' | 'skipped' | 'not_executed'
+  syntaxValidation?: 'passed' | 'failed'
+  dependencyValidation?: 'passed' | 'failed'
+  staticValidation?: 'passed' | 'failed'
+  testFrameworkValidation?: 'passed' | 'failed'
+  securityValidation?: 'passed' | 'failed'
+  policyValidation?: 'passed' | 'failed' | 'blocked' | 'unknown'
   safeToPropose: boolean
 }
 
-export type PrState = 'PR_ELIGIBLE' | 'PR_BLOCKED' | 'HUMAN_REVIEW_REQUIRED' | 'VALIDATION_FAILED'
+export type PrState = 'PR_ELIGIBLE' | 'PR_BLOCKED' | 'HUMAN_REVIEW_REQUIRED' | 'VALIDATION_FAILED' | 'POLICY_UNKNOWN'
 
 export type ContributionPolicyResult = {
   isBlocked: boolean
