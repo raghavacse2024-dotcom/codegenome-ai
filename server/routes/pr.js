@@ -46,20 +46,23 @@ prRouter.post('/pr/validate', async (req, res, next) => {
       filesToValidate.push({ path: targetPath, content: refactoredTarget })
     }
 
-    const guardrails = validatePrGuardrails({
-      files: filesToValidate,
-      patch: refactorData.diff?.rawPatch || '',
-    })
-
     const validation = await validateRefactor({
       files: filesToValidate,
       targetPath,
       refactoredTarget,
+      baseFiles: analysis.files || [],
+      patch: refactorData.diff?.rawPatch || '',
+      confirmedHighRisk: Boolean(req.body.confirmedHighRisk),
     })
 
     res.json({
-      guardrails,
-      ...validation,
+      state: validation.state,
+      policy: validation.policy,
+      language: validation.language,
+      validation: validation.validation,
+      guardrails: validation.guardrails,
+      failedStep: validation.failedStep,
+      logs: validation.logs,
     })
   } catch (error) {
     next(error)
@@ -136,6 +139,7 @@ prRouter.post('/pr/create', async (req, res, next) => {
       branch,
       body,
       files: filesToCommit,
+      baseFiles: analysis.files || [],
       patch: rawPatch,
       token,
       user,
@@ -143,6 +147,10 @@ prRouter.post('/pr/create', async (req, res, next) => {
       refactoredTarget,
       confirmedHighRisk: Boolean(confirmedHighRisk),
     })
+
+    if (result.state === 'PR_BLOCKED') {
+      return res.status(403).json(result)
+    }
 
     if (!result.success) {
       return res.status(400).json(result)

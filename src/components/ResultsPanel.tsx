@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Copy, Check, FileCode, Server, Activity, ArrowRight, ShieldCheck, Zap, Code2, Network, GitPullRequest, GitBranch, FileDiff as FileDiffIcon } from 'lucide-react'
+import { Copy, Check, FileCode, Server, Activity, ArrowRight, ShieldCheck, Zap, Code2, Network, GitPullRequest, GitBranch, FileDiff as FileDiffIcon, ShieldAlert, AlertTriangle, AlertCircle, CheckCircle } from 'lucide-react'
 import type { Analysis, Scaffold, Hotspot } from '../types'
 import { useCountUp } from '../hooks/useCountUp'
 import { DemoModeBadge } from './DemoModeBadge'
@@ -246,24 +246,81 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
       </motion.section>
 
       <motion.section className="panel" variants={panelVariant}>
-        <div className="panel-head action-head">
-          <div>
-            <p className="eyebrow">Refactor package</p>
-            <h2>{refactor.data.pullRequestTitle}</h2>
-          </div>
-          <div className="action-buttons-group">
-            <button
-              type="button"
-              className="pr-trigger-btn"
-              onClick={() => setPrModalOpen(true)}
-              title="Create automated Pull Request on GitHub"
-            >
-              <GitPullRequest size={13} style={{ marginRight: 6 }} />
-              Automate PR
-            </button>
-            <DownloadButton analysisId={analysis.analysisId} />
-          </div>
-        </div>
+        {(() => {
+          const prState = refactor.data.state || review.data.state || (refactor.data.policy?.isBlocked ? 'PR_BLOCKED' : 'PR_ELIGIBLE')
+          const isBlocked = prState === 'PR_BLOCKED' || Boolean(refactor.data.policy?.isBlocked)
+          return (
+            <>
+              <div className="panel-head action-head">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="eyebrow" style={{ margin: 0 }}>Refactor package</p>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase inline-flex items-center gap-1 ${
+                      prState === 'PR_BLOCKED'
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                        : prState === 'HUMAN_REVIEW_REQUIRED'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : prState === 'VALIDATION_FAILED'
+                        ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    }`}>
+                      {prState === 'PR_BLOCKED' && <ShieldAlert size={10} />}
+                      {prState === 'PR_ELIGIBLE' && <CheckCircle size={10} />}
+                      {prState === 'HUMAN_REVIEW_REQUIRED' && <AlertTriangle size={10} />}
+                      {prState === 'VALIDATION_FAILED' && <AlertCircle size={10} />}
+                      {prState}
+                    </span>
+                  </div>
+                  <h2>{refactor.data.pullRequestTitle}</h2>
+                </div>
+                <div className="action-buttons-group">
+                  <button
+                    type="button"
+                    className={`pr-trigger-btn ${isBlocked ? 'pr-trigger-btn--blocked' : ''}`}
+                    onClick={() => setPrModalOpen(true)}
+                    title={isBlocked ? (refactor.data.policy?.explanation || 'PR blocked by repository policy') : 'Create automated Pull Request on GitHub'}
+                  >
+                    {isBlocked ? (
+                      <>
+                        <ShieldAlert size={13} style={{ marginRight: 6, color: '#f87171' }} />
+                        PR Blocked (Policy)
+                      </>
+                    ) : (
+                      <>
+                        <GitPullRequest size={13} style={{ marginRight: 6 }} />
+                        Automate PR
+                      </>
+                    )}
+                  </button>
+                  <DownloadButton analysisId={analysis.analysisId} />
+                </div>
+              </div>
+
+              {isBlocked && (
+                <div className="p-3 mb-4 rounded-lg bg-red-950/30 border border-red-500/30 text-xs text-red-300 flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldAlert size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="text-red-200 block mb-0.5">
+                        Automated PR Blocked: {refactor.data.policy?.policyFile || 'AGENTS.md'} Restriction
+                      </strong>
+                      <span className="text-red-300/90 leading-relaxed">
+                        {refactor.data.policy?.explanation || 'Repository policy prohibits automated or AI-generated pull requests. CodeGenome AI respects maintainer rules and will not open automated PRs.'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 rounded bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 text-xs font-medium whitespace-nowrap cursor-pointer transition-colors"
+                    onClick={() => setPrModalOpen(true)}
+                  >
+                    View Policy & Diff &rarr;
+                  </button>
+                </div>
+              )}
+            </>
+          )
+        })()}
         <ol className="steps">
           {refactor.data.steps.map((step, idx) => (
             <motion.li 

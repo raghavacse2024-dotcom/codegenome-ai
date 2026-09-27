@@ -482,6 +482,7 @@ export function createAutomatedPullRequest(params: {
   branch?: string
   body?: string
   baseBranch?: string
+  confirmedHighRisk?: boolean
 }): Promise<import('../types').PullRequestResult> {
   const token = getSessionToken()
   const githubPat = getGitHubPat()

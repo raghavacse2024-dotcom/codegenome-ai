@@ -14,8 +14,12 @@ import {
   FileCode,
   Loader2,
   Key,
+  ShieldAlert,
+  AlertTriangle,
+  FileText,
+  BookOpen,
 } from 'lucide-react'
-import type { Analysis, PullRequestResult } from '../types'
+import type { Analysis, PullRequestResult, PrState } from '../types'
 import { createAutomatedPullRequest, downloadGitPatch, getSessionToken, getGitHubPat, setGitHubPat, registerSession } from '../services/apiService'
 import { GitHubAuthModal } from './GitHubAuthModal'
 
@@ -46,6 +50,16 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [patInput, setPatInput] = useState(getGitHubPat() || '')
   const [forceShowPat, setForceShowPat] = useState(false)
+  const [confirmedHighRisk, setConfirmedHighRisk] = useState(false)
+
+  const initialPolicy = refactorData.policy || results.review.data.policy
+  const initialPrState: PrState = refactorData.state || results.review.data.state || (initialPolicy?.isBlocked ? 'PR_BLOCKED' : 'PR_ELIGIBLE')
+
+  const currentState: PrState = result?.state || initialPrState
+  const currentPolicy = result?.policy || initialPolicy || { isBlocked: false, policyFile: null, ruleSnippet: null, explanation: '' }
+  const isBlocked = currentState === 'PR_BLOCKED' || Boolean(currentPolicy.isBlocked)
+  const isHumanReviewRequired = currentState === 'HUMAN_REVIEW_REQUIRED'
+  const isValidationFailed = currentState === 'VALIDATION_FAILED'
 
   const pat = getGitHubPat()
   const isGoogleOrFallbackSession = Boolean(
@@ -71,6 +85,16 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
+    if (isBlocked) {
+      setError(currentPolicy.explanation || 'Pull request creation is blocked by repository contribution policy.')
+      return
+    }
+
+    if (isHumanReviewRequired && !confirmedHighRisk) {
+      setError('Explicit human review and confirmation is required before submitting.')
+      return
+    }
+
     setLoading(true)
     setError(null)
 
@@ -91,6 +115,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
         branch,
         body,
         baseBranch,
+        confirmedHighRisk,
       })
       setResult(res)
       if (res.pushed && res.prUrl) {
@@ -114,6 +139,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
   }
 
   const diffSummary = refactorData.diff?.summary
+  const defaultCliCommand = `git checkout -b ${branch} && git apply --whitespace=fix codegenome-refactor.patch`
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -131,13 +157,27 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
         {/* Modal Header */}
         <div className="modal-header">
           <div className="modal-header-info">
-            <div className="modal-icon-badge modal-icon-badge--pr">
-              <GitPullRequest size={16} />
+            <div className={`modal-icon-badge ${isBlocked ? 'modal-icon-badge--danger' : 'modal-icon-badge--pr'}`}>
+              {isBlocked ? <ShieldAlert size={16} /> : <GitPullRequest size={16} />}
             </div>
             <div>
-              <h3 id="pr-modal-title" className="modal-title">
-                Automated Pull Request
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 id="pr-modal-title" className="modal-title">
+                  {isBlocked ? 'Repository Contribution Policy' : 'Automated Pull Request'}
+                </h3>
+                {/* Explicit State Pill */}
+                <span className={`px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase ${
+                  currentState === 'PR_BLOCKED'
+                    ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                    : currentState === 'HUMAN_REVIEW_REQUIRED'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : currentState === 'VALIDATION_FAILED'
+                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                }`}>
+                  {currentState}
+                </span>
+              </div>
               <p className="modal-subtitle">
                 {repo.owner}/{repo.repository}
               </p>
@@ -159,6 +199,97 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
             <div className="pr-error-banner">
               <AlertCircle size={15} />
               <span>{error}</span>
+            </div>
+          )}
+
+          {/* Blocked by Repository Contribution Policy State */}
+          {isBlocked && (
+            <div className="p-4 mb-4 rounded-xl bg-red-950/40 border border-red-500/40 text-sm flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-red-500/20 text-red-400 flex-shrink-0 mt-0.5">
+                  <ShieldAlert size={20} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-red-200 text-sm mb-1">
+                    PR Creation Blocked by Repository Policy
+                  </h4>
+                  <p className="text-red-300/90 text-xs leading-relaxed mb-2">
+                    {currentPolicy.explanation || `This repository's ${currentPolicy.policyFile || 'AGENTS.md'} strictly prohibits automated or AI-generated pull requests.`}
+                  </p>
+                  {currentPolicy.ruleSnippet && (
+                    <div className="p-2 rounded bg-black/50 border border-red-500/30 text-xs font-mono text-red-200">
+                      &ldquo;{currentPolicy.ruleSnippet}&rdquo;
+                    </div>
+                  )}
+                  <p className="text-slate-400 text-xs mt-2">
+                    CodeGenome AI honors maintainer rules and will <strong>not</strong> open automated pull requests against this repository. You may inspect the proposed diff, export the patch, and submit changes manually if permitted.
+                  </p>
+                </div>
+              </div>
+
+              {/* Manual Continuation & Export Options */}
+              <div className="pt-3 border-t border-red-500/20 flex flex-wrap gap-2.5">
+                <button
+                  type="button"
+                  className="pr-btn pr-btn--primary"
+                  onClick={() => downloadGitPatch(analysis.analysisId)}
+                >
+                  <Download size={14} />
+                  <span>Download .patch File</span>
+                </button>
+                <button
+                  type="button"
+                  className="pr-btn pr-btn--secondary"
+                  onClick={() => handleCopyCli(defaultCliCommand)}
+                >
+                  {copiedCli ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copiedCli ? 'Copied CLI Command' : 'Copy CLI Patch Command'}</span>
+                </button>
+              </div>
+
+              <div className="p-3 rounded-lg bg-black/40 border border-slate-800 text-xs flex flex-col gap-1 text-slate-300">
+                <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                  <BookOpen size={13} className="text-emerald-400" /> How to continue manually:
+                </span>
+                <ol className="list-decimal list-inside space-y-1 text-slate-400 pl-1 mt-1">
+                  <li>Download or copy the unified patch above.</li>
+                  <li>Review the diff locally and adapt it according to <code>{currentPolicy.policyFile || 'CONTRIBUTING.md'}</code>.</li>
+                  <li>Follow the project&apos;s human submission guidelines without using automated tooling.</li>
+                </ol>
+              </div>
+            </div>
+          )}
+
+          {/* Validation Failed Notice */}
+          {isValidationFailed && !isBlocked && (
+            <div className="p-3.5 mb-4 rounded-xl bg-rose-950/40 border border-rose-500/40 text-xs text-rose-300 flex items-start gap-2.5">
+              <AlertCircle size={16} className="text-rose-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-semibold text-rose-200 block mb-0.5">Refactor Validation Failed</strong>
+                <span>The refactoring proposal did not pass isolated validation checks. Inspect the diff or run validation again to ensure syntax and test framework compatibility.</span>
+              </div>
+            </div>
+          )}
+
+          {/* Human Review Required Notice */}
+          {isHumanReviewRequired && !isBlocked && (
+            <div className="p-3.5 mb-4 rounded-xl bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex flex-col gap-2.5">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <strong className="font-semibold text-amber-100 block mb-0.5">Explicit Human Review Required</strong>
+                  <span>This refactor touches high-impact repository files (e.g. CI/CD workflows, configuration, or large diffs). Automated PRs cannot be proposed without explicit human confirmation.</span>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 mt-1 cursor-pointer select-none text-slate-200 font-medium">
+                <input
+                  type="checkbox"
+                  checked={confirmedHighRisk}
+                  onChange={(e) => setConfirmedHighRisk(e.target.checked)}
+                  className="rounded border-slate-700 text-amber-500 focus:ring-0"
+                />
+                <span>I have manually reviewed the proposed changes and approve creating this Pull Request.</span>
+              </label>
             </div>
           )}
 
@@ -218,142 +349,6 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                 </button>
               </div>
 
-              {/* Convert to Live PR option */}
-              {!result.prUrl && (
-                <div 
-                  className="p-5 rounded-xl text-sm flex flex-col gap-4 mb-5"
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(8, 27, 38, 0.95), rgba(12, 40, 56, 0.95))',
-                    border: '1px solid rgba(57, 243, 195, 0.2)',
-                  }}
-                >
-                  <div className="flex items-start gap-3">
-                    <div 
-                      className="p-2 rounded-lg mt-0.5 flex-shrink-0"
-                      style={{
-                        background: 'rgba(57, 243, 195, 0.1)',
-                        color: '#39f3c3',
-                      }}
-                    >
-                      <GitPullRequest size={18} />
-                    </div>
-                    <div>
-                      <h5 className="font-semibold text-white text-sm mb-1">Create Real Pull Request on GitHub</h5>
-                      <p className="text-slate-300 text-xs leading-relaxed">
-                        {hasWriteToken ? (
-                          <>
-                            You are authenticated with your GitHub account! CodeGenome can automatically fork this repository, commit your files, and <strong>redirect you directly to GitHub</strong> to review and open your Pull Request.
-                          </>
-                        ) : (
-                          <>
-                            CodeGenome can automatically fork this repository to your profile, push the refactor branch, and <strong>redirect you directly to GitHub</strong> to review and open your Pull Request in 1 click!
-                          </>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2.5">
-                    {(!hasWriteToken || forceShowPat) ? (
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs text-slate-400 font-medium">
-                          GitHub Personal Access Token (PAT)
-                        </label>
-                        <div className="input-with-icon" style={{ position: 'relative' }}>
-                          <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '12px', color: '#94a3b8' }} />
-                          <input
-                            type="password"
-                            placeholder="Paste your GitHub Personal Access Token (ghp_...)"
-                            value={patInput}
-                            onChange={(e) => setPatInput(e.target.value)}
-                            style={{
-                              width: '100%',
-                              padding: '10px 12px 10px 32px',
-                              background: 'rgba(0,0,0,0.5)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              borderRadius: '8px',
-                              color: '#ffffff',
-                              fontSize: '13px',
-                              outline: 'none',
-                              boxSizing: 'border-box'
-                            }}
-                          />
-                        </div>
-                        <p className="text-[11px] text-slate-400">
-                          Requires <code>repo</code> scope to fork and push commits to GitHub.
-                        </p>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setForceShowPat(true)}
-                        className="text-xs text-slate-400 hover:text-neon underline text-left cursor-pointer transition-colors py-0.5"
-                        style={{ background: 'none', border: 'none' }}
-                      >
-                        Using a different GitHub account or Personal Access Token (PAT)? Click here
-                      </button>
-                    )}
-                    
-                    {error && (
-                      <div className="text-xs text-red-400 mt-1 flex items-center gap-1.5">
-                        <AlertCircle size={13} />
-                        <span>{error}</span>
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      className="pr-btn pr-btn--primary w-full mt-1.5 justify-center"
-                      onClick={async () => {
-                        setLoading(true);
-                        setError(null);
-
-                        const cleanPat = patInput.trim();
-                        if (cleanPat) {
-                          setGitHubPat(cleanPat);
-                          const sess = getSessionToken();
-                          if (sess) {
-                            await registerSession(sess, undefined, cleanPat).catch(() => null);
-                          }
-                        }
-                        try {
-                          const res = await createAutomatedPullRequest({
-                            analysisId: analysis.analysisId,
-                            title: result.title || title,
-                            branch: result.branch || branch,
-                            body: result.body || body,
-                            baseBranch: result.baseBranch || baseBranch,
-                          });
-                          setResult(res);
-                          if (res.prUrl) {
-                            openPrUrl(res.prUrl);
-                          }
-                        } catch (err: any) {
-                          const errMsg = err?.message || 'Failed to create real Pull Request.'
-                          setError(errMsg);
-                          setForceShowPat(true);
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
-                      disabled={loading}
-                    >
-                      {loading ? (
-                        <>
-                          <Loader2 size={14} className="spin-icon animate-spin" />
-                          <span>Pushing Branch & Creating PR...</span>
-                        </>
-                      ) : (
-                        <>
-                          <ExternalLink size={14} />
-                          <span>Push to GitHub & Open Pull Request</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-
               {/* CLI Command if applicable */}
               {result.cliCommand && (
                 <div className="pr-cli-box">
@@ -400,6 +395,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                       type="text"
                       value={baseBranch}
                       onChange={(e) => setBaseBranch(e.target.value)}
+                      disabled={isBlocked}
                       required
                     />
                   </div>
@@ -414,6 +410,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                       type="text"
                       value={branch}
                       onChange={(e) => setBranch(e.target.value)}
+                      disabled={isBlocked}
                       required
                     />
                   </div>
@@ -427,6 +424,7 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
+                  disabled={isBlocked}
                   required
                 />
               </div>
@@ -435,84 +433,89 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                 <label htmlFor="prBody">Pull Request Description (Markdown)</label>
                 <textarea
                   id="prBody"
-                  rows={6}
+                  rows={5}
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
+                  disabled={isBlocked}
                   required
                 />
               </div>
 
-              {hasWriteToken ? (
-                <div className="flex items-center gap-2.5 p-3 rounded-xl bg-[#064e3b]/30 border border-[#059669]/40 mb-4 text-xs text-[#34d399]">
-                  <CheckCircle size={16} className="text-[#39f3c3] flex-shrink-0" />
-                  <div>
-                    <span className="font-semibold text-white">GitHub Write Permissions Active:</span>{' '}
-                    <span>Your session has repository write access authorized. CodeGenome will automatically fork, push the branch, and open your live Pull Request on GitHub.</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-[#081b26] border border-[#164e63]/30 mb-4 text-sm">
-                  <div className="flex items-start gap-2 text-xs text-cyan-200">
-                    <AlertCircle size={15} className="text-[#39f3c3] flex-shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="font-semibold block mb-0.5 text-white">GitHub Write Authorization (For Live PR)</strong>
-                      To push the refactored branch to GitHub and create a live Pull Request, GitHub requires authorization with <code>repo</code> scope. (If you connect your token once during login, it is saved permanently).
-                      <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                        <button
-                          type="button"
-                          onClick={() => setShowAuthModal(true)}
-                          style={{
-                            padding: '6px 12px',
-                            background: '#24292e',
-                            border: '1px solid #39f3c3',
-                            borderRadius: '6px',
-                            color: '#ffffff',
-                            fontSize: '11px',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px'
-                          }}
-                        >
-                          <GitBranch size={12} className="text-[#39f3c3]" />
-                          <span>1-Click Authorize with GitHub (Write Access)</span>
-                        </button>
-                        <a 
-                          href="https://github.com/settings/tokens/new?scopes=repo&description=CodeGenome+AI+PR+Integration" 
-                          target="_blank" 
-                          rel="noreferrer" 
-                          style={{ color: '#39f3c3', textDecoration: 'underline', fontSize: '11px' }}
-                        >
-                          Or generate token on GitHub &rarr;
-                        </a>
+              {!isBlocked && (
+                <>
+                  {hasWriteToken ? (
+                    <div className="flex items-center gap-2.5 p-3 rounded-xl bg-[#064e3b]/30 border border-[#059669]/40 mb-4 text-xs text-[#34d399]">
+                      <CheckCircle size={16} className="text-[#39f3c3] flex-shrink-0" />
+                      <div>
+                        <span className="font-semibold text-white">GitHub Write Permissions Active:</span>{' '}
+                        <span>Your session has repository write access authorized. CodeGenome will automatically fork, push the branch, and open your live Pull Request on GitHub.</span>
                       </div>
                     </div>
-                  </div>
-                  
-                  <div className="flex flex-col gap-1.5">
-                    <div className="input-with-icon" style={{ position: 'relative' }}>
-                      <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '11px', color: '#94a3b8' }} />
-                      <input
-                        type="password"
-                        placeholder="Paste your GitHub Personal Access Token (ghp_...) [Optional]"
-                        value={patInput}
-                        onChange={(e) => setPatInput(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px 8px 32px',
-                          background: 'rgba(0,0,0,0.5)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '8px',
-                          color: '#ffffff',
-                          fontSize: '13px',
-                          outline: 'none',
-                          boxSizing: 'border-box'
-                        }}
-                      />
+                  ) : (
+                    <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-[#081b26] border border-[#164e63]/30 mb-4 text-sm">
+                      <div className="flex items-start gap-2 text-xs text-cyan-200">
+                        <AlertCircle size={15} className="text-[#39f3c3] flex-shrink-0 mt-0.5" />
+                        <div>
+                          <strong className="font-semibold block mb-0.5 text-white">GitHub Write Authorization (For Live PR)</strong>
+                          To push the refactored branch to GitHub and create a live Pull Request, GitHub requires authorization with <code>repo</code> scope.
+                          <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => setShowAuthModal(true)}
+                              style={{
+                                padding: '6px 12px',
+                                background: '#24292e',
+                                border: '1px solid #39f3c3',
+                                borderRadius: '6px',
+                                color: '#ffffff',
+                                fontSize: '11px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                              }}
+                            >
+                              <GitBranch size={12} className="text-[#39f3c3]" />
+                              <span>1-Click Authorize with GitHub (Write Access)</span>
+                            </button>
+                            <a 
+                              href="https://github.com/settings/tokens/new?scopes=repo&description=CodeGenome+AI+PR+Integration" 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              style={{ color: '#39f3c3', textDecoration: 'underline', fontSize: '11px' }}
+                            >
+                              Or generate token on GitHub &rarr;
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1.5">
+                        <div className="input-with-icon" style={{ position: 'relative' }}>
+                          <Key size={13} className="input-icon" style={{ position: 'absolute', left: '10px', top: '11px', color: '#94a3b8' }} />
+                          <input
+                            type="password"
+                            placeholder="Paste your GitHub Personal Access Token (ghp_...) [Optional]"
+                            value={patInput}
+                            onChange={(e) => setPatInput(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '8px 12px 8px 32px',
+                              background: 'rgba(0,0,0,0.5)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              borderRadius: '8px',
+                              color: '#ffffff',
+                              fontSize: '13px',
+                              outline: 'none',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  )}
+                </>
               )}
 
               <div className="pr-form-footer">
@@ -522,30 +525,42 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
                   onClick={onClose}
                   disabled={loading}
                 >
-                  Cancel
+                  Close
                 </button>
-                <button
-                  type="submit"
-                  className="pr-btn pr-btn--primary"
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 size={14} className="spin-icon animate-spin" />
-                      <span>{hasWriteToken || patInput.trim() ? 'Pushing Branch & Creating PR...' : 'Compiling Refactor Package...'}</span>
-                    </>
-                  ) : hasWriteToken || patInput.trim() ? (
-                    <>
-                      <GitPullRequest size={14} />
-                      <span>Fork, Push & Create Live PR</span>
-                    </>
-                  ) : (
-                    <>
-                      <GitPullRequest size={14} />
-                      <span>Generate Patch & Prepare PR</span>
-                    </>
-                  )}
-                </button>
+                {isBlocked ? (
+                  <button
+                    type="button"
+                    className="pr-btn pr-btn--secondary opacity-60 cursor-not-allowed"
+                    disabled
+                    title={currentPolicy.explanation}
+                  >
+                    <ShieldAlert size={14} className="text-red-400" />
+                    <span>PR Blocked by Policy</span>
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    className="pr-btn pr-btn--primary"
+                    disabled={loading || (isHumanReviewRequired && !confirmedHighRisk) || isValidationFailed}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 size={14} className="spin-icon animate-spin" />
+                        <span>{hasWriteToken || patInput.trim() ? 'Pushing Branch & Creating PR...' : 'Compiling Refactor Package...'}</span>
+                      </>
+                    ) : hasWriteToken || patInput.trim() ? (
+                      <>
+                        <GitPullRequest size={14} />
+                        <span>Fork, Push & Create Live PR</span>
+                      </>
+                    ) : (
+                      <>
+                        <GitPullRequest size={14} />
+                        <span>Generate Patch & Prepare PR</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </form>
           )}

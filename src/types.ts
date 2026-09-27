@@ -86,12 +86,25 @@ export type RefactorValidation = {
   lint: 'passed' | 'failed' | 'skipped'
   typecheck: 'passed' | 'failed' | 'skipped'
   build: 'passed' | 'failed' | 'skipped'
+  policy?: 'passed' | 'failed' | 'skipped'
   safeToPropose: boolean
+}
+
+export type PrState = 'PR_ELIGIBLE' | 'PR_BLOCKED' | 'HUMAN_REVIEW_REQUIRED' | 'VALIDATION_FAILED'
+
+export type ContributionPolicyResult = {
+  isBlocked: boolean
+  policyFile: string | null
+  ruleSnippet: string | null
+  explanation: string
+  allowsManualExport?: boolean
 }
 
 export type PullRequestResult = {
   success: boolean
   mode: 'live' | 'ready' | 'simulated' | 'blocked' | 'validation_failed'
+  state?: PrState
+  policy?: ContributionPolicyResult
   pushed?: boolean
   prUrl?: string | null
   prNumber?: number
@@ -107,6 +120,7 @@ export type PullRequestResult = {
   isHighRisk?: boolean
   validation?: RefactorValidation
   failedStep?: string | null
+  allowsManualExport?: boolean
 }
 
 export type Analysis = {
@@ -162,9 +176,24 @@ export type Analysis = {
         scaffolds: Scaffold[]
         refactoredTarget?: string
         diff?: RefactorGitDiff
-        pullRequestTitle: string 
+        language?: string
+        testFramework?: string
+        pullRequestTitle: string
+        state?: PrState
+        policy?: ContributionPolicyResult
+        validation?: RefactorValidation
+        pipelineSteps?: { step: string; name: string; status: string; details?: string }[]
       } 
     }
-    review: { data: { verdict: string; checks: string[]; caveat?: string | null } }
+    review: { 
+      data: { 
+        verdict: string
+        checks: string[]
+        caveat?: string | null
+        state?: PrState
+        policy?: ContributionPolicyResult
+        validation?: RefactorValidation
+      } 
+    }
   }
 }

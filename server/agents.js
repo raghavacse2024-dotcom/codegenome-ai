@@ -3,6 +3,8 @@ import { GoogleGenAI } from '@google/genai'
 import { analyzeFileAST, detectCircularDependencies } from './services/astAnalyzer.js'
 import { buildRefactorGitDiff } from './services/diffService.js'
 import { redactSecrets, redactRepositoryFiles } from './services/secretRedactor.js'
+import { generateScaffolds } from './services/scaffoldGenerator.js'
+import { validateRefactor } from './services/refactorValidator.js'
 
 export const AGENTS = [
   ['Architecture', 'Maps codebase layers and boundaries.'],
@@ -23,20 +25,6 @@ const framework = (files) => {
 }
 
 const hotspot = (file) => analyzeFileAST(file.path, file.content)
-
-const scaffold = (target) => {
-  const name = target.path.split('/').pop().replace(/\.[^.]+$/, '') || 'Feature'
-  return [
-    {
-      path: `src/features/${name}/${name}.ts`,
-      content: `export type ${name}Input = { id: string }\n\nexport function create${name}(input: ${name}Input) {\n  return { ...input }\n}\n`
-    },
-    {
-      path: `src/features/${name}/${name}.test.ts`,
-      content: `import { describe, expect, it } from 'vitest'\nimport { create${name} } from './${name}'\n\ndescribe('create${name}', () => {\n  it('keeps its contract stable', () => {\n    expect(create${name}({ id: 'demo' })).toEqual({ id: 'demo' })\n  })\n})\n`
-    }
-  ]
-}
 
 function isValidKey(key) {
   return Boolean(key && !key.startsWith('optional_') && !key.startsWith('your_') && key.length > 10)
@@ -205,13 +193,20 @@ export async function runAnalysis(repository, onProgress = null) {
 
   const target = hotspots[0] || { path: files[0]?.path || 'src/feature.ts' }
   const targetFile = files.find((f) => f.path === target.path) || files[0]
-  const scaffolds = scaffold(target)
-  const safeName = target.path.split('/').pop().replace(/\.[^.]+$/, '') || 'Feature'
-  const functionName = `create${safeName[0].toUpperCase()}${safeName.slice(1)}`
-  const refactoredTarget = targetFile?.content
-    ? `// [CodeGenome AI Refactor]: Decoupled monolithic logic to reduce cyclomatic complexity\nimport { ${functionName} } from './features/${safeName}/${safeName}'\n\n${targetFile.content}\n\n// Modular delegation hook\nexport const modular${safeName[0].toUpperCase()}${safeName.slice(1)} = ${functionName}\n`
-    : ''
-  const diff = buildRefactorGitDiff(targetFile, refactoredTarget, scaffolds)
+  const generated = generateScaffolds({ target: target.path }, targetFile, files)
+  const scaffolds = generated.files
+  const refactoredTarget = generated.refactoredTargetContent
+  const diff = generated.diff
+
+  // 2. Validate the generated refactor through the isolated sandbox pipeline
+  // Note: Original repository AST analysis is NOT considered proof that the generated refactor is valid.
+  const validationResult = await validateRefactor({
+    files: scaffolds,
+    targetPath: target.path,
+    refactoredTarget,
+    baseFiles: files,
+    patch: diff?.rawPatch || '',
+  })
 
   const refactorBase = {
     target: target.path,
@@ -219,21 +214,41 @@ export async function runAnalysis(repository, onProgress = null) {
     scaffolds,
     refactoredTarget,
     diff,
-    pullRequestTitle: `refactor: modularize ${target.path}`
+    language: generated.language,
+    testFramework: generated.testFramework,
+    pullRequestTitle: `refactor: modularize ${target.path}`,
+    state: validationResult.state,
+    validation: validationResult.validation,
+    policy: validationResult.policy,
   }
+
+  const reviewChecks = [
+    `Language & environment: ${generated.language} matching target repository conventions.`,
+    `Generated code syntax: ${validationResult.validation.lint === 'passed' ? 'Valid ' + generated.language + ' AST' : 'Syntax error in generated code'}.`,
+    `Dependency & module boundaries: ${validationResult.validation.typecheck === 'passed' ? 'Imports resolved and verified' : 'Import resolution issues'}.`,
+    `Test-framework compatibility: ${validationResult.validation.tests === 'passed' ? 'Compatible with ' + generated.testFramework : 'Test framework mismatch'}.`,
+    `Generated-code integrity: ${validationResult.validation.build === 'passed' ? 'Artifacts non-empty and structurally sound' : 'Build failed'}.`,
+    `Security & secret checks: ${validationResult.guardrails.passed ? 'No secrets or sensitive files' : 'Violations detected'}.`,
+    `Repository contribution policy: ${validationResult.policy.isBlocked ? 'Blocked: ' + validationResult.policy.ruleSnippet : 'Permitted by policy'}.`,
+  ]
+
+  const reviewVerdict = validationResult.policy.isBlocked
+    ? 'Policy Blocked'
+    : (validationResult.validation.safeToPropose ? 'Verified' : 'Validation Failed')
 
   const reviewBase = {
-    verdict: 'Verified',
-    checks: [
-      'Recommendation is supported by sampled file AST metrics.',
-      'Scaffold is additive and does not alter the analyzed repository.',
-      'Tests cover the proposed public contract.',
-      `AST engine validated ${astAnalyzedCount} module syntax trees.`
-    ],
-    caveat: repository.truncated ? 'Repository sampling limit reached; inspect the full tree before merging.' : null
+    verdict: reviewVerdict,
+    state: validationResult.state,
+    checks: reviewChecks,
+    policy: validationResult.policy,
+    validation: validationResult.validation,
+    pipelineSteps: validationResult.pipelineSteps,
+    caveat: validationResult.policy.isBlocked
+      ? validationResult.policy.explanation
+      : (repository.truncated ? 'Repository sampling limit reached; inspect the full tree before merging.' : null)
   }
 
-  // 2. Parallel execution of agent enhancements
+  // 3. Parallel execution of agent enhancements
   emit('Architecture', 'running', AGENTS[0][1])
   emit('Technical Debt', 'running', AGENTS[1][1])
   emit('Risk & Cost', 'running', AGENTS[2][1])
@@ -256,6 +271,23 @@ export async function runAnalysis(repository, onProgress = null) {
 
   outcomes.cost = costResult
   emit('Risk & Cost', 'complete', 'Business case handed to Refactor Planner.')
+
+  // Ensure refactor scaffolds maintain target language even if enhanced by external AI
+  if (Array.isArray(refactorResult.data?.scaffolds)) {
+    const isLangMatch = refactorResult.data.scaffolds.every((f) => {
+      if (generated.language === 'python') return /\.py$/i.test(f.path)
+      if (generated.language === 'go') return /\.go$/i.test(f.path)
+      if (generated.language === 'java') return /\.java$/i.test(f.path)
+      if (generated.language === 'rust') return /\.rs$/i.test(f.path)
+      if (generated.language === 'javascript') return /\.jsx?$/i.test(f.path)
+      if (generated.language === 'typescript') return /\.tsx?$/i.test(f.path)
+      return true
+    })
+    if (!isLangMatch) {
+      refactorResult.data.scaffolds = scaffolds
+      refactorResult.data.refactoredTarget = refactoredTarget
+    }
+  }
 
   outcomes.refactor = refactorResult
   emit('Refactor Planner', 'complete', 'Scaffold handed to Review.')

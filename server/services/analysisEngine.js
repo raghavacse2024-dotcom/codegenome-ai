@@ -1,6 +1,7 @@
 import { fetchRepository } from '../github.js'
 import { runAnalysis } from '../agents.js'
 import { generateScaffolds } from './scaffoldGenerator.js'
+import { validateRefactor } from './refactorValidator.js'
 
 /**
  * Runs GitHub ingestion and all five CodeGenome agents with a hard timeout.
@@ -21,10 +22,30 @@ export async function analyzeRepository(repositoryUrl, token = null, onProgress 
     const result = await runAnalysis(repository, onProgress)
     const targetPath = result.results.refactor.data.target
     const targetFile = repository.files?.find((f) => f.path === targetPath) || repository.files?.[0] || null
-    const generated = generateScaffolds(result.results.refactor.data, targetFile)
+    const generated = generateScaffolds(result.results.refactor.data, targetFile, repository.files || [])
     result.results.refactor.data.scaffolds = generated.files
     result.results.refactor.data.refactoredTarget = generated.refactoredTargetContent
     result.results.refactor.data.diff = generated.diff
+    result.results.refactor.data.language = generated.language
+    result.results.refactor.data.testFramework = generated.testFramework
+
+    const validationResult = await validateRefactor({
+      files: generated.files,
+      targetPath,
+      refactoredTarget: generated.refactoredTargetContent,
+      baseFiles: repository.files || [],
+      patch: generated.diff?.rawPatch || '',
+    })
+
+    result.results.refactor.data.state = validationResult.state
+    result.results.refactor.data.validation = validationResult.validation
+    result.results.refactor.data.policy = validationResult.policy
+    result.results.refactor.data.pipelineSteps = validationResult.pipelineSteps
+    result.results.review.data.state = validationResult.state
+    result.results.review.data.policy = validationResult.policy
+    result.results.review.data.verdict = validationResult.policy.isBlocked
+      ? 'Policy Blocked'
+      : (validationResult.validation.safeToPropose ? 'Verified' : 'Validation Failed')
 
     const analyzedCount = repository.files?.length || 0
     const repoCount = repository.metadata?.repositoryFileCount || analyzedCount
