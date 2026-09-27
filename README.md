@@ -1,190 +1,495 @@
-<div align="center">
+# CodeGenomeAI
 
-# 🧬 CodeGenome AI
+### AI-powered GitHub repository intelligence, static analysis, and refactoring assistance.
 
-### **Autonomous Multi-Agent Repository Intelligence & Codebase Refactoring Engine**
+CodeGenomeAI helps developers understand complex repositories by combining **AST-based static analysis, deterministic engineering heuristics, and specialized AI agents**. It analyzes repository structure, identifies complexity and technical-debt hotspots, estimates risk and maintenance effort, answers questions about the analyzed codebase, and generates refactoring scaffolds that can be reviewed and optionally turned into GitHub pull requests.
 
-[![React](https://img.shields.io/badge/React-18.3-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![Framer Motion](https://img.shields.io/badge/Framer_Motion-13.2-0055FF?style=for-the-badge&logo=framer&logoColor=white)](https://www.framer.com/motion/)
-[![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Express](https://img.shields.io/badge/Express-4.21-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-
-*Deconstruct complex codebases, map system architecture, price technical debt in developer hours and financial currency, and generate downloadable automated refactoring blueprints.*
-
-[**Explore Demo**](https://github.com/raghavacse2024-dotcom/codegenome-ai) • [**Report Bug**](https://github.com/raghavacse2024-dotcom/codegenome-ai/issues) • [**Request Feature**](https://github.com/raghavacse2024-dotcom/codegenome-ai/issues)
+> **Important:** Repository analysis is currently sample-based and results should be treated as analysis/recommendation output, not as a guarantee of repository-wide correctness or behavior-preserving refactoring.
 
 ---
 
-</div>
+## Why CodeGenomeAI?
 
-## 📌 Overview
+Large codebases are difficult to understand quickly. Developers often spend significant time answering questions such as:
 
-**CodeGenome AI** is a state-of-the-art codebase telemetry and automated refactoring platform powered by a cooperative mesh of 5 specialized AI execution agents. 
+- Where are the architectural boundaries?
+- Which files are becoming difficult to maintain?
+- Where is complexity concentrated?
+- What areas represent the highest refactoring risk?
+- What should be refactored first?
+- How can an improvement be turned into a concrete code change?
 
-Given any public GitHub repository URL, CodeGenome AI performs a **100% read-only scan**, analyzes AST structures, maps module dependency boundaries, calculates technical debt indices with financial estimations, pinpoints fragile code hotspots, and generates complete, drop-in replacement TypeScript/JavaScript refactor scaffolds.
-
----
-
-## ✨ Key Features
-
-### 🌟 Interactive Animated Landing Page
-- **Sleek Aesthetic**: Built with dark mode, aurora glow effects, neon accents, and responsive typography.
-- **Scroll-Driven Micro-Animations**: Smooth Framer Motion `whileInView` reveals, 3D card hover tilt, step connectors, and glowing borders.
-- **Live Terminal Visualization**: Interactive mockup simulating real-time agent node telemetry streams.
-- **Interactive FAQ Accordion**: Instant answers to common security, performance, and API questions.
-
-### 🤖 5-Agent AI Mesh Pipeline
-- 🧬 **Architecture Agent**: Maps entrypoints, module dependency graphs, cycle bindings, and system boundary layers.
-- 💰 **Technical Debt Agent**: Calculates cyclomatic complexity load, refactor effort hours, and financial cost estimates.
-- 🎯 **Risk & Cost Agent**: Scans for high-churn fragile files, complexity bottlenecks, and bug propagation hotspots.
-- 🛠️ **Refactor Planner**: Generates clean, modular code blueprints with updated typings, docstrings, and decoupled patterns.
-- 🔍 **Review Agent**: Ensures AST compliance, zero breaking changes, and read-only protocol verification.
-
-### 📊 Comprehensive Telemetry Reports
-- **Health & Debt Index Scorecards**: Real-time numerical scores (e.g. `84/100`), effort estimations, and financial pricing.
-- **Hotspot Fragility Heatmap**: Pinpoints critical files with high cyclomatic complexity and risk metrics.
-- **Language Distribution Bar**: Visual breakdown of repository languages (TypeScript, JavaScript, Python, Go, etc.).
-
-### 💬 Grounded Repository Q&A & 1-Click Code Export
-- **Repository Q&A Assistant**: Ask natural-language questions about any module, architecture pattern, or refactoring strategy.
-- **Instant ZIP Export**: Download complete refactored code scaffold ZIP bundles ready for review and integration.
+CodeGenomeAI turns these questions into a structured analysis workflow.
 
 ---
 
-## 🏗️ Architecture & Multi-Agent Workflow
+## Core Features
+
+### 1. Repository Intelligence
+
+Connect a GitHub repository and build a structured snapshot containing:
+
+- Repository metadata
+- Source-file sampling
+- Language distribution
+- Entry-point detection
+- Project structure
+- Dependency and circular-dependency signals
+
+The ingestion layer supports authenticated GitHub access and includes fallback behavior for demo/degraded environments.
+
+### 2. AST & Static Analysis
+
+CodeGenomeAI does not rely entirely on an LLM.
+
+Its analysis pipeline uses deterministic code analysis to calculate signals such as:
+
+- Cyclomatic complexity
+- File-level complexity scores
+- Hotspot detection
+- Dependency relationships
+- Circular dependencies
+- Architecture boundary violations
+- Language and repository structure
+
+These signals form the baseline that AI agents can enhance.
+
+### 3. Five Specialized Analysis Agents
+
+The platform organizes analysis into five focused agents:
+
+| Agent | Responsibility |
+|---|---|
+| **Architecture** | Maps layers, entry points, boundaries, and dependency issues |
+| **Technical Debt** | Identifies complexity and maintainability hotspots |
+| **Risk & Cost** | Converts technical signals into priority and maintenance-cost estimates |
+| **Refactor Planner** | Produces concrete refactoring plans and code scaffolds |
+| **Review** | Reviews the generated recommendations against available analysis evidence |
+
+AI enhancement can use **Google Gemini** or an **OpenAI-compatible provider**, with deterministic analysis available as a fallback.
+
+### 4. Real-Time Analysis
+
+Analysis progress can be streamed to the frontend using **Server-Sent Events (SSE)**.
+
+Users can see agent lifecycle events while the repository is being analyzed rather than waiting for a single opaque response.
+
+### 5. Technical-Debt Dashboard
+
+The dashboard presents analysis results through:
+
+- Health/debt indicators
+- Complexity metrics
+- Hotspot lists
+- Language distribution
+- Risk and cost estimates
+- Refactoring recommendations
+- Agent execution status
+
+### 6. Repository Q&A
+
+Ask natural-language questions about an analyzed repository and its findings.
+
+The Q&A workflow uses the stored analysis context to answer questions about architecture, complexity, risks, and refactoring recommendations.
+
+### 7. Refactoring Scaffolds
+
+CodeGenomeAI can generate:
+
+- Refactoring steps
+- Focused module scaffolds
+- Test scaffolds
+- Git diffs
+- Downloadable ZIP bundles
+
+These outputs are intended for developer review and integration rather than being presented as guaranteed drop-in replacements.
+
+### 8. GitHub Pull Request Workflow
+
+With appropriate GitHub authorization, CodeGenomeAI can prepare changes and interact with GitHub to:
+
+1. Create a branch
+2. Fork the repository when required
+3. Build Git trees and commits
+4. Push the generated changes
+5. Create a pull request or provide a GitHub comparison URL
+
+Without write authorization, the system falls back to a review-ready patch workflow.
+
+---
+
+## Architecture
 
 ```mermaid
-graph TD
-    A[Public GitHub Repository URL] --> B[Server / API Gateway]
-    B --> C[GitHub AST & File Sampler]
-    C --> D[Multi-Agent Execution Mesh]
-    
-    subgraph Multi-Agent Network
-        D --> E[Node 01: Architecture Agent]
-        D --> F[Node 02: Technical Debt Agent]
-        D --> G[Node 03: Risk & Cost Agent]
-        D --> H[Node 04: Refactor Planner]
-        D --> I[Node 05: Review Agent]
-    end
-    
-    E --> J[Telemetry Report Generator]
-    F --> J
-    G --> J
-    H --> J
-    I --> J
-    
-    J --> K[Interactive Cockpit Dashboard]
-    J --> L[Grounded Repository Q&A]
-    J --> M[Downloadable Refactor ZIP Scaffold]
+flowchart TD
+    A[GitHub Repository] --> B[Repository Ingestion]
+    B --> C[File Sampling & Metadata]
+    C --> D[AST / Static Analysis]
+
+    D --> E[Analysis Baseline]
+
+    E --> F[Architecture Agent]
+    E --> G[Technical Debt Agent]
+    E --> H[Risk & Cost Agent]
+    E --> I[Refactor Planner]
+    E --> J[Review Agent]
+
+    F --> K[Analysis Report]
+    G --> K
+    H --> K
+    I --> K
+    J --> K
+
+    K --> L[Dashboard]
+    K --> M[Repository Q&A]
+    K --> N[Refactor Scaffold]
+
+    N --> O[Git Diff / ZIP]
+    O --> P[GitHub Branch / PR]
+```
+
+### Hybrid Analysis Model
+
+The core design intentionally combines deterministic analysis with AI:
+
+```
+Repository
+    ↓
+Static / AST Analysis
+    ↓
+Deterministic Baseline
+    ↓
+AI Enhancement
+    ↓
+Structured Findings
+    ↓
+Developer Review
+```
+
+This allows the application to remain useful even when an AI provider is unavailable.
+
+---
+
+## Technology Stack
+
+### Frontend
+
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS
+- Framer Motion
+- Lucide React
+- React Markdown
+
+### Backend
+
+- Node.js
+- Express.js
+- Zod
+- OpenAI SDK
+- Google GenAI SDK
+- JSZip
+- Archiver
+
+### Analysis
+
+- AST-based static analysis
+- Cyclomatic-complexity analysis
+- Dependency analysis
+- Deterministic heuristics
+- Multi-agent AI orchestration
+
+### Data & Authentication
+
+- Firebase / Firestore
+- GitHub OAuth
+- GitHub Personal Access Tokens
+- GitHub REST API
+
+### Testing & Deployment
+
+- Vitest
+- TypeScript checks
+- Vite production builds
+- Render deployment configuration
+
+---
+
+## Analysis Flow
+
+A typical repository analysis follows this workflow:
+
+```
+1. GitHub repository URL
+          ↓
+2. Repository metadata + source sampling
+          ↓
+3. AST and dependency analysis
+          ↓
+4. Deterministic analysis baseline
+          ↓
+5. Five specialized analysis agents
+          ↓
+6. Structured telemetry report
+          ↓
+7. Dashboard + repository Q&A
+          ↓
+8. Refactoring scaffold
+          ↓
+9. Optional GitHub branch / PR workflow
 ```
 
 ---
 
-## 🚀 Getting Started
+## AI Providers
+
+CodeGenomeAI supports AI enhancement through:
+
+- **Google Gemini**
+- **OpenAI-compatible APIs**
+
+The OpenAI-compatible configuration can also support compatible providers through a configurable base URL.
+
+When an AI provider is unavailable, the system can fall back to deterministic analysis.
+
+---
+
+## Repository Coverage
+
+To keep analysis responsive and control resource usage, CodeGenomeAI currently uses repository/file sampling limits.
+
+This means results should be interpreted as:
+
+> **Analysis of the sampled repository context**
+
+rather than a guarantee that every file in a very large repository has been analyzed.
+
+A future direction is a full repository indexing and retrieval architecture for deeper repository-wide analysis.
+
+---
+
+## Security & Reliability
+
+CodeGenomeAI is designed around a read-oriented repository analysis workflow and includes validation, timeouts, caching, provider fallback, and structured error handling.
+
+Security hardening areas include:
+
+- Authentication and authorization
+- Secure GitHub OAuth state handling
+- Firestore ownership rules
+- Secret detection/redaction
+- Prompt-injection defenses for untrusted repository content
+- Rate limiting and AI budget controls
+- Isolated validation of generated refactoring changes
+
+Generated refactoring should always be reviewed by a developer before being merged.
+
+---
+
+## API
+
+Core backend endpoints include:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/health` | Service health and mode |
+| POST | `/api/analyze` | Start repository analysis |
+| GET/POST | `/api/analyze/stream` | Stream analysis progress |
+| GET | `/api/history` | Retrieve user analysis history |
+| GET | `/api/analysis/:id` | Retrieve a saved analysis |
+| POST | `/api/qa` | Ask questions about an analysis |
+| POST | `/api/download` | Download generated refactoring artifacts |
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
-- **Node.js**: v18.0.0 or higher
-- **npm**: v9.0.0 or higher
+- Node.js 18+
+- npm 9+
 
-### Local Installation
-
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/raghavacse2024-dotcom/codegenome-ai.git
-   cd codegenome-ai
-   ```
-
-2. **Install Dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Configure Environment Variables**
-   ```bash
-   cp .env.example .env
-   ```
-
-4. **Launch Development Server**
-   ```bash
-   npm run dev
-   ```
-
-5. **Access the Application**
-   - **Frontend UI**: [http://localhost:5173](http://localhost:5173)
-   - **Backend API**: [http://localhost:3001](http://localhost:3001)
-
----
-
-## ⚙️ Environment Variables
-
-Create a `.env` file in the root directory:
-
-| Variable | Required | Description | Default |
-| :--- | :---: | :--- | :--- |
-| `PORT` | Optional | Port for Express backend server | `3001` |
-| `VITE_API_URL` | Optional | Frontend API base URL | `http://localhost:3001` |
-| `OPENAI_API_KEY` | Optional | Key for OpenAI LLM reasoning | *Demo mode active if unset* |
-| `OPENAI_MODEL` | Optional | Model identifier (e.g. `gpt-4o`, `gpt-4-turbo`) | `gpt-4-turbo` |
-| `GITHUB_TOKEN` | Optional | GitHub Personal Access Token for higher rate limits | *Unauthenticated limits if unset* |
-
-> **Note**: Without `OPENAI_API_KEY` or `GITHUB_TOKEN`, CodeGenome AI operates seamlessly in **Demo Mode**, utilizing representative deterministic analysis algorithms.
-
----
-
-## 🔌 API Endpoints Reference
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/health` | Returns service health status, timestamp, and mode (Live/Demo). |
-| `POST` | `/api/analyze` | Accepts `{ url: string }`, runs 5-agent scan, and returns telemetry report. |
-| `POST` | `/api/download` | Accepts `{ analysisId: string }` and streams a ZIP refactor scaffold bundle. |
-| `POST` | `/api/qa` | Accepts `{ analysisId, question }` and returns grounded repository answers. |
-
----
-
-## 🧪 Testing & Verification
-
-Run the automated Vitest test suite covering URL validation, repository sampling, rate-limit fallback, and multi-agent orchestration:
+### 1. Clone
 
 ```bash
-# Run unit & contract tests
-npm test
+git clone https://github.com/raghavacse2024-dotcom/codegenome-ai.git
+cd codegenome-ai
+```
 
-# Build production bundle
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Configure environment
+
+Copy the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+Configure the providers and integrations you want to use.
+
+### 4. Run locally
+
+```bash
+npm run dev
+```
+
+### 5. Verify the project
+
+```bash
+npm test
+npm run lint
 npm run build
 ```
 
 ---
 
-## 🌐 Deploy to Render
+## Environment Variables
 
-This application includes a pre-configured `render.yaml` for 1-click deployment on Render:
+The exact environment configuration is documented in `.env.example`.
 
-1. Push your repository to GitHub.
-2. Go to [Render Blueprint Dashboard](https://dashboard.render.com/blueprint/new).
-3. Connect `https://github.com/raghavacse2024-dotcom/codegenome-ai`.
-4. Apply the Blueprint configuration.
-5. Optionally configure `OPENAI_API_KEY` and `GITHUB_TOKEN` in Render Environment Settings.
+Common configuration includes:
+
+| Variable | Purpose |
+|---|---|
+| `PORT` | Express server port |
+| `VITE_API_URL` | Frontend API URL |
+| `GEMINI_API_KEY` | Google Gemini access |
+| `GEMINI_MODEL` | Gemini model selection |
+| `OPENAI_API_KEY` | OpenAI-compatible provider access |
+| `OPENAI_MODEL` | OpenAI-compatible model selection |
+| `OPENAI_BASE_URL` | Optional compatible-provider endpoint |
+| `GITHUB_TOKEN` | Optional GitHub API access |
+| `GITHUB_CLIENT_ID` | GitHub OAuth application ID |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth application secret |
+
+Never commit secrets to the repository.
 
 ---
 
-## 🛠️ Technology Stack
+## Testing
 
-- **Frontend**: React 18, TypeScript, Vite, Framer Motion, Lucide React, Tailwind CSS
-- **Backend**: Node.js, Express.js, Archiver, JSZip, OpenAI API
-- **Testing**: Vitest
-- **Deployment**: Render Blueprint (`render.yaml`)
+Run the automated test suite:
+
+```bash
+npm test
+```
+
+Run the TypeScript check:
+
+```bash
+npm run lint
+```
+
+Create a production frontend build:
+
+```bash
+npm run build
+```
 
 ---
 
-## 📄 License
+## Project Structure
 
-Distributed under the **MIT License**. See `LICENSE` for more information.
+```
+codegenome-ai/
+├── server/
+│   ├── agents.js
+│   ├── github.js
+│   ├── contracts.js
+│   ├── routes/
+│   │   ├── analyze.js
+│   │   ├── auth.js
+│   │   ├── download.js
+│   │   ├── health.js
+│   │   ├── pr.js
+│   │   └── qa.js
+│   └── services/
+│       ├── analysisEngine.js
+│       ├── analysisStore.js
+│       ├── astAnalyzer.js
+│       ├── diffService.js
+│       ├── firestoreServer.js
+│       ├── prService.js
+│       └── scaffoldGenerator.js
+│
+├── src/
+│   ├── components/
+│   ├── hooks/
+│   ├── services/
+│   └── ...
+│
+├── docs/
+├── scripts/
+├── firestore.rules
+├── render.yaml
+├── package.json
+└── README.md
+```
+
+---
+
+## Roadmap
+
+### Current Foundation
+
+- GitHub repository ingestion
+- AST/static analysis
+- Five-agent analysis pipeline
+- SSE progress streaming
+- Analysis dashboard
+- Repository Q&A
+- Refactoring scaffolds
+- GitHub branch/commit/PR workflow
+- Persistent analysis history
+
+### Next Improvements
+
+- Full repository indexing
+- Code-aware retrieval for deeper Q&A
+- Secure sandbox validation of generated refactors
+- Automated tests/lint/typecheck/build before PR creation
+- Stronger Firestore ownership rules
+- Improved OAuth/session security
+- Secret scanning and redaction
+- More robust PR safety controls
+- Broader language support
+
+---
+
+## Design Principles
+
+CodeGenomeAI follows a few core principles:
+
+**Evidence before speculation**  
+Static analysis provides measurable signals before AI enhancement.
+
+**AI as an engineering assistant**  
+AI generates recommendations and scaffolds; developers remain responsible for reviewing changes.
+
+**Graceful degradation**  
+The application should remain useful when an AI provider or authenticated GitHub access is unavailable.
+
+**Developer-controlled changes**  
+Generated changes should be inspectable through diffs and reviewed before integration.
+
+---
+
+## License
+
+MIT License.
+
+---
 
 <div align="center">
-  <sub>Built with ❤️ for modern software engineering teams.</sub>
+
+**CodeGenomeAI**
+
+*From complex codebases to actionable engineering insights.*
+
 </div>
