@@ -1,31 +1,15 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import { initializeApp, getApps } from 'firebase/app'
-import { getFirestore } from 'firebase/firestore'
-
-let dbInstance = null
+import { getFirebaseAdmin } from './firebaseAdmin.js'
 
 /**
- * Initializes and provides the Firebase Firestore instance safely.
- * Returns null if configuration is missing or invalid.
+ * Initializes and provides the server-side Firebase Admin Firestore instance safely.
+ * Returns null if Admin SDK initialization or credentials are unavailable.
  */
 export function getServerFirestore() {
-  if (dbInstance) return dbInstance
-
   try {
-    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json')
-    if (!fs.existsSync(configPath)) {
-      return null
-    }
-
-    const rawConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-    const app = getApps().length > 0 ? getApps()[0] : initializeApp(rawConfig)
-
-    dbInstance = getFirestore(app, rawConfig.firestoreDatabaseId)
-
-    return dbInstance
+    const { firestore } = getFirebaseAdmin()
+    return firestore || null
   } catch (error) {
-    console.warn('[Firestore] Server initialization warning:', error.message)
+    console.warn('[FirestoreServer] Admin Firestore initialization warning:', error.message)
     return null
   }
 }

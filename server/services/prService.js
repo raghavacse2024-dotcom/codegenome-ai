@@ -10,10 +10,27 @@ import { validateRefactor } from './refactorValidator.js'
 function getCleanToken(customToken) {
   if (customToken && typeof customToken === 'string') {
     const clean = customToken.trim()
-    if (clean.length > 5 && !clean.startsWith('optional_') && !clean.startsWith('your_')) return clean
+    if (
+      clean.length > 5 &&
+      !clean.startsWith('optional_') &&
+      !clean.startsWith('your_') &&
+      !clean.startsWith('mock-') &&
+      !clean.startsWith('test-')
+    ) {
+      return clean
+    }
   }
   const token = process.env.GITHUB_TOKEN?.trim()
-  if (!token || token.startsWith('optional_') || token.startsWith('your_') || token.length < 10) return null
+  if (
+    !token ||
+    token.startsWith('optional_') ||
+    token.startsWith('your_') ||
+    token.startsWith('mock-') ||
+    token.startsWith('test-') ||
+    token.length < 10
+  ) {
+    return null
+  }
   return token
 }
 
@@ -314,6 +331,7 @@ export async function createPullRequest({
         return {
           success: true,
           mode: 'live',
+          githubStatus: 'BRANCH_CREATED',
           state: 'PR_ELIGIBLE',
           pushed: true,
           prUrl: compareUrl,
@@ -327,12 +345,14 @@ export async function createPullRequest({
         }
       }
     } catch (error) {
-      console.warn('[PR Service] Live API attempt fallback:', error.message)
+      console.warn('[PR Service] Live API attempt failed:', error.message)
       return {
-        success: true,
-        mode: 'simulated',
+        success: false,
+        mode: 'live',
+        githubStatus: 'FAILED',
         state: 'PR_ELIGIBLE',
         pushed: false,
+        error: `GitHub API operation failed: ${error.message}`,
         prUrl: null,
         branch: safeBranch,
         baseBranch: targetBaseBranch,
@@ -341,15 +361,16 @@ export async function createPullRequest({
         patch,
         cliCommand,
         validation: validationResult.validation,
-        message: `Changes prepared and validated for ${owner}/${repository}! To create a live Pull Request on GitHub, sign in or enter a Personal Access Token to fork and push.`,
+        message: `GitHub API operation failed: ${error.message}. Changes remain validated and can be applied locally using the Git CLI command or patch below.`,
       }
     }
   }
 
-  // Fallback when live API push token is restricted or unavailable:
+  // Fallback when live API push token is not provided (unattempted live push)
   return {
     success: true,
     mode: 'simulated',
+    githubStatus: 'NOT_ATTEMPTED',
     state: 'PR_ELIGIBLE',
     pushed: false,
     prUrl: null,

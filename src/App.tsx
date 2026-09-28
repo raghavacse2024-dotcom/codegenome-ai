@@ -131,13 +131,6 @@ export default function App() {
         try {
           localStorage.setItem('codegenome_github_user', JSON.stringify(ghUser))
         } catch {}
-        const currentSession = getSessionToken()
-        const hasExistingGitHubAuth = currentSession && !currentSession.startsWith('cg_google_') && getGitHubPat()
-        if (!hasExistingGitHubAuth) {
-          const sId = 'cg_google_' + firebaseUser.uid
-          setSessionToken(sId)
-          registerSession(sId, ghUser).catch(() => {})
-        }
       }
     })
     return () => unsubscribe()
@@ -438,7 +431,7 @@ export default function App() {
               </AnimatePresence>
 
               <section className="results-region" id="results">
-                {analysis && <ResultsPanel analysis={analysis} />}
+                {analysis && <ResultsPanel analysis={analysis} user={user} />}
               </section>
             </section>
           </motion.main>

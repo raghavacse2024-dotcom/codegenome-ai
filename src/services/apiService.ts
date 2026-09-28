@@ -232,12 +232,21 @@ export interface StreamCallbacks {
 /**
  * Real-time Server-Sent Events (SSE) repository analysis with resilient fallback.
  */
-export function analyzeRepositoryStream(
+export async function analyzeRepositoryStream(
   repositoryUrl: string,
   callbacks: StreamCallbacks = {}
 ): Promise<Analysis> {
+  let token: string | null = null
+  if (auth?.currentUser) {
+    try {
+      token = await auth.currentUser.getIdToken()
+    } catch {}
+  }
+  if (!token) {
+    token = getSessionToken() || getGitHubPat()
+  }
+
   return new Promise((resolve) => {
-    const token = getSessionToken()
     const queryParams = new URLSearchParams({ url: repositoryUrl })
     if (token) {
       queryParams.set('token', token)

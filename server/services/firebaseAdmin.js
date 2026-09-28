@@ -52,11 +52,12 @@ export function getFirebaseAdmin() {
 }
 
 /**
- * Verifies a Firebase ID token cryptographically.
+ * Verifies a Firebase ID token cryptographically using Firebase Admin SDK.
  * Rejects invalid, tampered, or expired tokens.
+ * UNVERIFIED JWT PAYLOAD DECODING IS STRICTLY FORBIDDEN.
  *
  * @param {string} idToken Raw Bearer ID token string.
- * @returns {Promise<{ uid: string, email?: string, name?: string, picture?: string }>}
+ * @returns {Promise<{ uid: string, email?: string, name?: string, picture?: string, verified: boolean }>}
  */
 export async function verifyFirebaseIdToken(idToken) {
   if (!idToken || typeof idToken !== 'string') {
@@ -74,7 +75,7 @@ export async function verifyFirebaseIdToken(idToken) {
     throw err
   }
 
-  // Handle test environment or simulated mock tokens cleanly
+  // Test-environment mock token verification (strictly prohibited in production)
   const isTestEnv = Boolean(process.env.VITEST || process.env.NODE_ENV === 'test')
   if (isTestEnv && cleanToken.startsWith('test_firebase_token_')) {
     if (cleanToken.includes('expired')) {
@@ -83,7 +84,7 @@ export async function verifyFirebaseIdToken(idToken) {
       err.code = 'TOKEN_EXPIRED'
       throw err
     }
-    if (cleanToken.includes('invalid')) {
+    if (cleanToken.includes('invalid') || cleanToken.includes('bad') || cleanToken.includes('tampered')) {
       const err = new Error('Firebase ID token is invalid.')
       err.status = 401
       err.code = 'INVALID_TOKEN'
@@ -98,52 +99,41 @@ export async function verifyFirebaseIdToken(idToken) {
     }
   }
 
+  // Production MUST NOT accept test tokens
+  if (cleanToken.startsWith('test_firebase_token_')) {
+    const err = new Error('Test tokens are not permitted in production environments.')
+    err.status = 401
+    err.code = 'UNAUTHORIZED'
+    throw err
+  }
+
   const { auth } = getFirebaseAdmin()
-  if (auth && typeof auth.verifyIdToken === 'function') {
-    try {
-      const decoded = await auth.verifyIdToken(cleanToken)
-      return {
-        uid: decoded.uid,
-        email: decoded.email,
-        name: decoded.name,
-        picture: decoded.picture,
-        verified: true,
-      }
-    } catch (err) {
-      const error = new Error(`Firebase token verification failed: ${err.message}`)
-      error.status = 401
-      error.code = err.code === 'auth/id-token-expired' ? 'TOKEN_EXPIRED' : 'UNAUTHORIZED'
-      throw error
+  if (!auth || typeof auth.verifyIdToken !== 'function') {
+    const error = new Error('Firebase Admin Auth service is unavailable for cryptographic token verification.')
+    error.status = 401
+    error.code = 'UNAUTHORIZED'
+    throw error
+  }
+
+  try {
+    const decoded = await auth.verifyIdToken(cleanToken)
+    if (!decoded || !decoded.uid) {
+      const err = new Error('Firebase ID token verification yielded an invalid UID.')
+      err.status = 401
+      err.code = 'UNAUTHORIZED'
+      throw err
     }
+    return {
+      uid: decoded.uid,
+      email: decoded.email || null,
+      name: decoded.name || null,
+      picture: decoded.picture || null,
+      verified: true,
+    }
+  } catch (err) {
+    const error = new Error(`Firebase token cryptographic verification failed: ${err.message}`)
+    error.status = 401
+    error.code = err.code === 'auth/id-token-expired' ? 'TOKEN_EXPIRED' : 'UNAUTHORIZED'
+    throw error
   }
-
-  // Fallback token structure check if admin credentials are unavailable
-  const jwtParts = cleanToken.split('.')
-  if (jwtParts.length === 3) {
-    try {
-      const payloadJson = Buffer.from(jwtParts[1], 'base64url').toString('utf8')
-      const payload = JSON.parse(payloadJson)
-      const now = Math.floor(Date.now() / 1000)
-      if (payload.exp && payload.exp < now) {
-        const err = new Error('Firebase ID token has expired.')
-        err.status = 401
-        err.code = 'TOKEN_EXPIRED'
-        throw err
-      }
-      if (payload.user_id || payload.sub || payload.uid) {
-        const uid = payload.user_id || payload.sub || payload.uid
-        return {
-          uid: String(uid),
-          email: payload.email,
-          name: payload.name,
-          verified: true,
-        }
-      }
-    } catch {}
-  }
-
-  const err = new Error('Firebase ID token verification failed.')
-  err.status = 401
-  err.code = 'UNAUTHORIZED'
-  throw err
 }

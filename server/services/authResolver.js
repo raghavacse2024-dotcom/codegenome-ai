@@ -2,12 +2,10 @@ import { sessionStore } from './sessionStore.js'
 import { verifyFirebaseIdToken } from './firebaseAdmin.js'
 
 /**
- * Resolves a stable canonical application user ID.
- * Priority:
- * 1. Verified Firebase Auth UID (primary application ownership)
- * 2. Session canonical userId
- * 3. GitHub numeric user ID (e.g. "gh_1234567")
- * 4. GitHub login identifier
+ * Resolves a stable canonical application user ID from VERIFIED identity objects.
+ * Primary Identity Model:
+ * 1. Firebase Auth: verified Firebase UID (e.g. "abc123xyz")
+ * 2. GitHub Auth: gh_<verified GitHub numeric ID> (e.g. "gh_12345678")
  *
  * @param {object | string | null} identity
  * @returns {string | null}
@@ -21,16 +19,50 @@ export function getCanonicalUserId(identity) {
   if (identity.firebaseUid || identity.uid) {
     return String(identity.firebaseUid || identity.uid).trim()
   }
-  if (identity.userId) {
+  if (identity.githubUserId || identity.user?.id || identity.id) {
+    const numId = identity.githubUserId || identity.user?.id || identity.id
+    return `gh_${numId}`
+  }
+  if (identity.userId && identity.userId !== 'token_user') {
     return String(identity.userId).trim()
   }
-  if (identity.githubUserId || identity.user?.id || identity.id) {
-    return `gh_${identity.githubUserId || identity.user?.id || identity.id}`
-  }
-  if (identity.githubLogin || identity.user?.login || identity.login) {
-    return String(identity.githubLogin || identity.user?.login || identity.login).trim()
-  }
   return null
+}
+
+/**
+ * Verifies a GitHub Personal Access Token against GitHub REST API.
+ * Returns verified user metadata with numeric GitHub ID or null if invalid.
+ *
+ * @param {string} pat Raw GitHub token.
+ * @returns {Promise<{ id: number, login: string, name: string, avatar_url: string } | null>}
+ */
+async function verifyGitHubToken(pat) {
+  if (!pat || typeof pat !== 'string' || pat.trim().length < 8) return null
+  const cleanPat = pat.trim()
+
+  try {
+    const response = await fetch('https://api.github.com/user', {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${cleanPat}`,
+        'User-Agent': 'CodeGenome-AI',
+      },
+      signal: AbortSignal.timeout(6_000),
+    })
+
+    if (!response.ok) return null
+    const user = await response.json()
+    if (!user || !user.id || !user.login) return null
+
+    return {
+      id: user.id,
+      login: user.login,
+      name: user.name || user.login,
+      avatar_url: user.avatar_url,
+    }
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -39,7 +71,7 @@ export function getCanonicalUserId(identity) {
  * or authenticated GitHub tokens.
  *
  * SECURITY: Client-provided identity headers (e.g. x-firebase-uid, x-github-user)
- * are NEVER trusted as proof of authentication or ownership.
+ * and client-constructed session aliases (e.g. cg_google_<uid>) are NEVER trusted.
  *
  * @param {import('express').Request} req
  * @returns {Promise<{
@@ -67,49 +99,32 @@ export async function resolveAuthenticatedUser(req) {
     candidate = req.query.token.trim()
   }
 
-  // 1. Session ID lookup (CodeGenome GitHub session: cg_sess_...)
+  // 1. Valid Server-Side Session Lookup (CodeGenome GitHub session: cg_sess_...)
   if (candidate && candidate.startsWith('cg_sess_')) {
     const session = sessionStore.getSession(candidate)
     if (session) {
-      const ghId = session.user?.id ? String(session.user.id) : null
-      const ghLogin = session.user?.login ? String(session.user.login) : null
-      const canonicalUserId = session.userId || (ghId ? `gh_${ghId}` : ghLogin) || candidate
+      const ghId = session.user?.id || session.githubUserId ? String(session.user?.id || session.githubUserId) : null
+      const ghLogin = session.user?.login || session.githubLogin ? String(session.user?.login || session.githubLogin) : null
+      const canonicalUserId = session.userId || (ghId ? `gh_${ghId}` : session.firebaseUid)
 
-      return {
-        authenticated: true,
-        userId: canonicalUserId,
-        firebaseUid: session.firebaseUid || null,
-        githubUserId: ghId,
-        githubLogin: ghLogin,
-        user: session.user || { login: ghLogin || 'developer' },
-        token: session.token || null,
-        sessionId: session.sessionId,
-        provider: 'github_session',
+      if (canonicalUserId) {
+        return {
+          authenticated: true,
+          userId: canonicalUserId,
+          firebaseUid: session.firebaseUid || null,
+          githubUserId: ghId,
+          githubLogin: ghLogin,
+          user: session.user || { id: ghId, login: ghLogin || 'developer' },
+          token: session.token || null,
+          sessionId: session.sessionId,
+          provider: 'github_session',
+        }
       }
     }
     return null
   }
 
-  // 2. Google/Firebase session alias (cg_google_<uid>)
-  if (candidate && candidate.startsWith('cg_google_')) {
-    const uid = candidate.slice(10).trim()
-    if (uid) {
-      return {
-        authenticated: true,
-        userId: uid,
-        firebaseUid: uid,
-        githubUserId: null,
-        githubLogin: null,
-        user: { login: uid, name: 'Google User' },
-        token: null,
-        sessionId: candidate,
-        provider: 'firebase',
-      }
-    }
-    return null
-  }
-
-  // 3. Firebase ID Token Verification (JWT or test token)
+  // 2. Cryptographic Firebase ID Token Verification
   if (candidate && (candidate.includes('.') || candidate.startsWith('test_firebase_token_')) && !candidate.startsWith('ghp_')) {
     try {
       const verified = await verifyFirebaseIdToken(candidate)
@@ -127,20 +142,20 @@ export async function resolveAuthenticatedUser(req) {
         }
       }
     } catch {
-      // Invalid or expired Firebase ID token -> caller will receive null / 401
+      // Invalid or expired Firebase ID token -> caller receives null / 401
       return null
     }
   }
 
-  // 4. GitHub PAT Token
+  // 3. Direct GitHub PAT Token Verification
   const directToken = customPat && typeof customPat === 'string' && customPat.trim().length > 5
     ? customPat.trim()
     : (candidate && !candidate.startsWith('cg_') && candidate.length > 5 ? candidate : null)
 
   if (directToken) {
-    // Check if mapped to active session
+    // Check if PAT is already mapped to an active server-side session
     for (const session of sessionStore.sessions.values()) {
-      if (session.token === directToken && session.userId) {
+      if (session.token === directToken && session.userId && session.userId !== 'token_user') {
         const ghId = session.user?.id ? String(session.user.id) : null
         const ghLogin = session.user?.login ? String(session.user.login) : null
         return {
@@ -149,7 +164,7 @@ export async function resolveAuthenticatedUser(req) {
           firebaseUid: session.firebaseUid || null,
           githubUserId: ghId,
           githubLogin: ghLogin,
-          user: session.user || { login: ghLogin || 'developer' },
+          user: session.user || { id: ghId, login: ghLogin || 'developer' },
           token: session.token,
           sessionId: session.sessionId,
           provider: 'github_pat',
@@ -157,17 +172,25 @@ export async function resolveAuthenticatedUser(req) {
       }
     }
 
-    return {
-      authenticated: true,
-      userId: 'token_user',
-      firebaseUid: null,
-      githubUserId: null,
-      githubLogin: 'token_user',
-      user: { login: 'token_user' },
-      token: directToken,
-      sessionId: null,
-      provider: 'github_pat',
+    // Verify raw PAT against GitHub API to obtain numeric identity
+    const verifiedGithubUser = await verifyGitHubToken(directToken)
+    if (verifiedGithubUser) {
+      const canonicalUserId = `gh_${verifiedGithubUser.id}`
+      return {
+        authenticated: true,
+        userId: canonicalUserId,
+        firebaseUid: null,
+        githubUserId: String(verifiedGithubUser.id),
+        githubLogin: verifiedGithubUser.login,
+        user: verifiedGithubUser,
+        token: directToken,
+        sessionId: null,
+        provider: 'github_pat',
+      }
     }
+
+    // Invalid GitHub PAT -> return null (401 Unauthorized)
+    return null
   }
 
   return null
@@ -216,19 +239,13 @@ export function assertAnalysisOwnership(analysis, user) {
 
   const currentUserId = String(user.userId).trim()
   const recordUserId = analysis.userId ? String(analysis.userId).trim() : null
-  const userLogin = user.user?.login ? String(user.user.login).trim() : null
-  const userGithubLogin = user.githubLogin ? String(user.githubLogin).trim() : null
-  const userFbUid = user.firebaseUid ? String(user.firebaseUid).trim() : null
-  const ghId = user.user?.id || user.githubUserId ? `gh_${user.user?.id || user.githubUserId}` : null
 
   // If analysis has a registered owner, enforce strict match
   if (recordUserId) {
     const isOwner = (recordUserId === currentUserId) ||
-                    (userFbUid && recordUserId === userFbUid) ||
-                    (userLogin && recordUserId === userLogin) ||
-                    (userGithubLogin && recordUserId === userGithubLogin) ||
-                    (userLogin && recordUserId === `gh_${userLogin}`) ||
-                    (ghId && recordUserId === ghId)
+                    (user.firebaseUid && recordUserId === user.firebaseUid) ||
+                    (user.githubUserId && recordUserId === `gh_${user.githubUserId}`) ||
+                    (user.githubLogin && recordUserId === user.githubLogin) // Legacy migration fallback
 
     if (!isOwner) {
       const err = new Error('Access forbidden: you do not have permission to view this analysis.')

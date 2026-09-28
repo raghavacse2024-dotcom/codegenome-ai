@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import {
   GitPullRequest,
@@ -138,11 +138,24 @@ export function AutomatedPrModal({ analysis, onClose }: AutomatedPrModalProps) {
     } catch {}
   }
 
+  const backdropMouseDownRef = useRef<boolean>(false)
+
+  const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    backdropMouseDownRef.current = e.target === e.currentTarget
+  }
+
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && backdropMouseDownRef.current) {
+      onClose()
+    }
+    backdropMouseDownRef.current = false
+  }
+
   const diffSummary = refactorData.diff?.summary
   const defaultCliCommand = `git checkout -b ${branch} && git apply --whitespace=fix codegenome-refactor.patch`
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onMouseDown={handleBackdropMouseDown} onClick={handleBackdropClick}>
       <motion.div
         className="modal-card pr-modal-card"
         onClick={(e) => e.stopPropagation()}

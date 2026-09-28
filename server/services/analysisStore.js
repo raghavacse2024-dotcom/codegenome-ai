@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { doc, setDoc, getDoc, collection, getDocs, query, where, limit } from 'firebase/firestore'
 import { getServerFirestore } from './firestoreServer.js'
 
 const analyses = new Map()
@@ -74,13 +73,13 @@ export async function saveAnalysis(analysis, userId = null) {
   // Always keep in local memory for fast synchronous responses and ownership checks
   analyses.set(analysisId, record)
 
-  // Persist to Cloud Firestore database if available
+  // Persist to Cloud Firestore database via Admin SDK if available
   try {
     const db = getServerFirestore()
     if (db) {
-      const docRef = doc(db, 'analyses', analysisId)
+      const docRef = db.collection('analyses').doc(analysisId)
       const firestoreData = prepareForFirestore(record)
-      await setDoc(docRef, firestoreData)
+      await docRef.set(firestoreData)
       console.log(`[Firestore] Successfully persisted analysis ${analysisId} for ${analysis.repo?.owner}/${analysis.repo?.repository}`)
     }
   } catch (err) {
@@ -103,13 +102,13 @@ export async function getAnalysis(analysisId) {
     return analyses.get(analysisId)
   }
 
-  // 2. Fallback to Cloud Firestore
+  // 2. Fallback to Cloud Firestore via Admin SDK
   try {
     const db = getServerFirestore()
     if (db) {
-      const docRef = doc(db, 'analyses', analysisId)
-      const snap = await getDoc(docRef)
-      if (snap.exists()) {
+      const docRef = db.collection('analyses').doc(analysisId)
+      const snap = await docRef.get()
+      if (snap.exists) {
         const data = restoreFromFirestore(snap.data())
         analyses.set(analysisId, data)
         return data
@@ -143,12 +142,14 @@ export async function getRecentAnalyses(userIdOrCount = null, maxCount = 12) {
   try {
     const db = getServerFirestore()
     if (db) {
-      const colRef = collection(db, 'analyses')
-      const q = userId
-        ? query(colRef, where('userId', '==', userId), limit(50))
-        : query(colRef, limit(50))
+      let queryRef = db.collection('analyses')
+      if (userId) {
+        queryRef = queryRef.where('userId', '==', userId).limit(50)
+      } else {
+        queryRef = queryRef.limit(50)
+      }
 
-      const snapshot = await getDocs(q)
+      const snapshot = await queryRef.get()
       const list = []
       snapshot.forEach((d) => {
         list.push(restoreFromFirestore(d.data()))
@@ -185,20 +186,19 @@ export async function clearUserAnalyses(userId) {
     }
   }
 
-  // 2. Delete documents from Firestore
+  // 2. Delete documents from Firestore via Admin SDK
   try {
     const db = getServerFirestore()
     if (db) {
-      const colRef = collection(db, 'analyses')
-      const q = query(colRef, where('userId', '==', userId))
-      const snapshot = await getDocs(q)
-      const { deleteDoc } = await import('firebase/firestore')
-      const deletes = []
-      snapshot.forEach((d) => {
-        deletes.push(deleteDoc(d.ref))
-      })
-      await Promise.all(deletes)
-      console.log(`[Firestore] Successfully cleared ${snapshot.size} analyses for user '${userId}'`)
+      const snapshot = await db.collection('analyses').where('userId', '==', userId).get()
+      if (!snapshot.empty) {
+        const batch = db.batch()
+        snapshot.forEach((doc) => {
+          batch.delete(doc.ref)
+        })
+        await batch.commit()
+        console.log(`[Firestore] Successfully cleared ${snapshot.size} analyses for user '${userId}'`)
+      }
     }
   } catch (err) {
     console.warn(`[Firestore] Failed to clear analyses for user '${userId}':`, err.message)

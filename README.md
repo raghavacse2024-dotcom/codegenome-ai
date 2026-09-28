@@ -462,6 +462,25 @@ codegenome-ai/
 
 ---
 
+## Security & Architecture
+
+### Authentication
+- **Firebase Auth**: Firebase ID tokens are verified cryptographically server-side using the Firebase Admin SDK. Client-provided identity headers are strictly rejected.
+- **GitHub OAuth / PAT**: GitHub tokens are verified directly against GitHub REST API (`https://api.github.com/user`), establishing canonical identities (`gh_<numeric_id>`).
+- **Encrypted Sessions**: Server-side sessions are stored using AES-256-GCM authenticated encryption. Production fails closed if `SESSION_ENCRYPTION_KEY` is missing.
+
+### Authorization & Data Boundaries
+- **Owner-Scoped Analysis**: Analyses are strictly scoped to the verified creator ID (`userId`).
+- **Resource Protection**: Protected endpoints (`/api/analysis/:id`, `/api/download`, `/api/qa`, `/api/pr/patch`, `/api/pr/create`) enforce strict ownership checks before yielding data or performing actions.
+- **Firestore Server Architecture**: Server-side persistence operates via Firebase Admin SDK with strict application-level authorization.
+
+### Refactor Safety & Validation Semantics
+- **Static Validation**: Refactoring validation performs static syntax, AST, import, and test framework compatibility checks.
+- **Honest Execution Semantics**: Static checks are explicitly distinguished from runtime execution (`tests: "not_executed"`, `build: "not_executed"`). Arbitrary repository code is never executed on the host server without process sandbox isolation.
+- **Developer Review**: Generated refactor scaffolds and patches are recommendations and must be reviewed and tested by human engineers before merging.
+
+---
+
 ## Design Principles
 
 CodeGenomeAI follows a few core principles:

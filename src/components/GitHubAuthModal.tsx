@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { GitBranch, Lock, AlertCircle, Key, CheckCircle2, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react'
 import type { GitHubUser } from '../types'
@@ -114,10 +114,23 @@ export function GitHubAuthModal({ isOpen, onClose, onSuccess }: GitHubAuthModalP
     }
   }
 
+  const backdropMouseDownRef = useRef<boolean>(false)
+
   if (!isOpen) return null
 
+  const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    backdropMouseDownRef.current = e.target === e.currentTarget
+  }
+
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && backdropMouseDownRef.current) {
+      onClose()
+    }
+    backdropMouseDownRef.current = false
+  }
+
   return (
-    <div className="auth-modal-overlay" onClick={onClose}>
+    <div className="auth-modal-overlay" onMouseDown={handleBackdropMouseDown} onClick={handleBackdropClick}>
       <motion.div 
         className="auth-modal-card" 
         onClick={(e) => e.stopPropagation()}

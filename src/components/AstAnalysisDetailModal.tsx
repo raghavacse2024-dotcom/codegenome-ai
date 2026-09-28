@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { GitCommit, Layers, Code2, AlertTriangle, ChevronDown, ChevronUp, Network, Zap } from 'lucide-react'
 import type { Hotspot } from '../types'
@@ -9,14 +9,27 @@ interface AstAnalysisDetailModalProps {
 }
 
 export function AstAnalysisDetailModal({ hotspot, onClose }: AstAnalysisDetailModalProps) {
+  const backdropMouseDownRef = useRef<boolean>(false)
+
   if (!hotspot) return null
 
   const ast = hotspot.ast
   const complexityLevel = !ast ? 'N/A' : ast.cyclomaticComplexity > 20 ? 'High' : ast.cyclomaticComplexity > 10 ? 'Moderate' : 'Low'
   const complexityColor = complexityLevel === 'High' ? 'var(--warn)' : complexityLevel === 'Moderate' ? 'var(--cyan)' : 'var(--neon)'
 
+  const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    backdropMouseDownRef.current = e.target === e.currentTarget
+  }
+
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && backdropMouseDownRef.current) {
+      onClose()
+    }
+    backdropMouseDownRef.current = false
+  }
+
   return (
-    <div className="auth-modal-overlay" onClick={onClose}>
+    <div className="auth-modal-overlay" onMouseDown={handleBackdropMouseDown} onClick={handleBackdropClick}>
       <motion.div 
         className="auth-modal-card ast-detail-modal" 
         onClick={(e) => e.stopPropagation()}

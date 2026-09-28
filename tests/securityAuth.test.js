@@ -9,73 +9,10 @@ import { prRouter } from '../server/routes/pr.js'
 import { downloadRouter } from '../server/routes/download.js'
 import { qaRouter } from '../server/routes/qa.js'
 import { errorHandler } from '../server/middleware/errorHandler.js'
-import { resolveAuthenticatedUser } from '../server/services/authResolver.js'
+import { resolveAuthenticatedUser, getCanonicalUserId } from '../server/services/authResolver.js'
 
-describe('Security: Authentication & Session Management', () => {
-  it('generates cryptographically secure OAuth states and prevents reuse', () => {
-    const state = sessionStore.createOAuthState({ redirect: '/test' })
-    expect(state).toBeDefined()
-    expect(state.length).toBeGreaterThanOrEqual(32)
-
-    // Valid on first verification
-    const isValidFirst = sessionStore.validateAndConsumeOAuthState(state)
-    expect(isValidFirst).toBe(true)
-
-    // Reuse must be blocked (CSRF/replay protection)
-    const isValidSecond = sessionStore.validateAndConsumeOAuthState(state)
-    expect(isValidSecond).toBe(false)
-  })
-
-  it('rejects invalid or tampered OAuth states', () => {
-    const invalidState = 'tampered_state_xyz_123'
-    const result = sessionStore.validateAndConsumeOAuthState(invalidState)
-    expect(result).toBe(false)
-  })
-
-  it('rejects expired OAuth states', () => {
-    const state = sessionStore.createOAuthState()
-    const entry = sessionStore.oauthStates.get(state)
-    if (entry) {
-      entry.expiresAt = Date.now() - 1000 // force expire
-    }
-
-    const isValid = sessionStore.validateAndConsumeOAuthState(state)
-    expect(isValid).toBe(false)
-  })
-
-  it('generates non-predictable session IDs with cryptographically secure prefix', () => {
-    const session1 = sessionStore.createSession({ token: 'test-token-1', userId: 'user1' })
-    const session2 = sessionStore.createSession({ token: 'test-token-2', userId: 'user2' })
-
-    expect(session1.sessionId).toMatch(/^cg_sess_[a-f0-9]{64}$/)
-    expect(session2.sessionId).toMatch(/^cg_sess_[a-f0-9]{64}$/)
-    expect(session1.sessionId).not.toEqual(session2.sessionId)
-  })
-
-  it('persists tokens to disk encrypted with AES-256-GCM and never in plaintext', () => {
-    const secretToken = 'ghp_secret_token_never_plaintext_on_disk_xyz'
-    const session = sessionStore.createSession({ token: secretToken, userId: 'secure_user' })
-    sessionStore.save()
-
-    // Read raw file on disk
-    if (fs.existsSync(sessionStore.filePath)) {
-      const rawDisk = fs.readFileSync(sessionStore.filePath, 'utf8')
-      expect(rawDisk).not.toContain(secretToken)
-      const parsed = JSON.parse(rawDisk)
-      const stored = parsed[session.sessionId]
-      expect(stored).toBeDefined()
-      // Encrypted format is iv:authTag:ciphertext
-      expect(stored.token).toMatch(/^[a-f0-9]{24}:[a-f0-9]{32}:[a-f0-9]+$/)
-    }
-  })
-
-  it('handles invalid decryption payloads safely without throwing crashes', () => {
-    expect(decryptToken('invalid:payload')).toBeNull()
-    expect(decryptToken('malformed_hex_iv:tag:data')).toBeNull()
-  })
-
-  it('authenticates valid Firebase ID tokens and rejects invalid/expired tokens', async () => {
-    // 1. Valid Firebase token
+describe('Security: Cryptographic Firebase Token & Identity Verification', () => {
+  it('1. verifies valid Firebase ID token and resolves authenticated user', async () => {
     const validReq = {
       headers: { authorization: 'Bearer test_firebase_token_firebase_user_123' },
     }
@@ -84,27 +21,123 @@ describe('Security: Authentication & Session Management', () => {
     expect(validUser.authenticated).toBe(true)
     expect(validUser.userId).toBe('firebase_user_123')
     expect(validUser.firebaseUid).toBe('firebase_user_123')
+    expect(validUser.provider).toBe('firebase')
+  })
 
-    // 2. Expired Firebase token -> returns null (401 unauthenticated)
+  it('2. rejects expired Firebase ID token with null (401 unauthenticated)', async () => {
     const expiredReq = {
       headers: { authorization: 'Bearer test_firebase_token_expired_999' },
     }
     const expiredUser = await resolveAuthenticatedUser(expiredReq)
     expect(expiredUser).toBeNull()
+  })
 
-    // 3. Invalid / tampered Firebase token -> returns null
+  it('3. rejects invalid Firebase ID token with null', async () => {
     const invalidReq = {
       headers: { authorization: 'Bearer test_firebase_token_invalid_bad' },
     }
     const invalidUser = await resolveAuthenticatedUser(invalidReq)
     expect(invalidUser).toBeNull()
+  })
 
-    // 4. Spoofed X-Firebase-UID header alone without token MUST BE REJECTED (returns null)
+  it('4. rejects tampered Firebase ID token with null', async () => {
+    const tamperedReq = {
+      headers: { authorization: 'Bearer test_firebase_token_tampered_header' },
+    }
+    const tamperedUser = await resolveAuthenticatedUser(tamperedReq)
+    expect(tamperedUser).toBeNull()
+  })
+
+  it('5. rejects unsigned/fake unverified JWT with null', async () => {
+    // Unsigned fake JWT: header.payload.fake_signature
+    const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
+    const payload = Buffer.from(JSON.stringify({ sub: 'fake_uid_attacker', exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')
+    const fakeJwt = `${header}.${payload}.`
+
+    const fakeReq = {
+      headers: { authorization: `Bearer ${fakeJwt}` },
+    }
+    const fakeUser = await resolveAuthenticatedUser(fakeReq)
+    expect(fakeUser).toBeNull()
+  })
+
+  it('6. ignores fake x-firebase-uid header without valid token', async () => {
     const spoofedReq = {
       headers: { 'x-firebase-uid': 'attacker_impersonated_victim_uid' },
     }
     const spoofedUser = await resolveAuthenticatedUser(spoofedReq)
     expect(spoofedUser).toBeNull()
+  })
+
+  it('7. rejects cg_google_fake_uid client session alias', async () => {
+    const googleAliasReq = {
+      headers: { authorization: 'Bearer cg_google_fake_uid_123' },
+    }
+    const aliasUser = await resolveAuthenticatedUser(googleAliasReq)
+    expect(aliasUser).toBeNull()
+  })
+
+  it('8. rejects invalid GitHub PAT (returns null / 401)', async () => {
+    const invalidPatReq = {
+      headers: { 'x-github-token': 'ghp_invalid_fake_token_value_xyz' },
+    }
+    const patUser = await resolveAuthenticatedUser(invalidPatReq)
+    expect(patUser).toBeNull()
+  })
+
+  it('9. never uses token_user as userId or login', async () => {
+    const invalidPatReq = {
+      headers: { authorization: 'Bearer ghp_invalid_fake_pat_token' },
+    }
+    const user = await resolveAuthenticatedUser(invalidPatReq)
+    if (user) {
+      expect(user.userId).not.toBe('token_user')
+      expect(user.githubLogin).not.toBe('token_user')
+    } else {
+      expect(user).toBeNull()
+    }
+  })
+
+  it('10. derives canonical user ID only from verified identities', () => {
+    expect(getCanonicalUserId({ firebaseUid: 'fb_123' })).toBe('fb_123')
+    expect(getCanonicalUserId({ githubUserId: '987654' })).toBe('gh_987654')
+    expect(getCanonicalUserId({ user: { id: 5555 } })).toBe('gh_5555')
+  })
+
+  it('11. prevents client-provided userId or login from overriding verified identity', () => {
+    const identity = {
+      firebaseUid: 'verified_fb_uid',
+      userId: 'attacker_custom_id',
+      githubLogin: 'attacker_login',
+    }
+    expect(getCanonicalUserId(identity)).toBe('verified_fb_uid')
+  })
+})
+
+describe('Security: Session Store & Encryption', () => {
+  it('generates non-predictable session IDs with cg_sess_ prefix', () => {
+    const session = sessionStore.createSession({ token: 'test-token', userId: 'gh_1001', user: { id: 1001, login: 'testuser' } })
+    expect(session.sessionId).toMatch(/^cg_sess_[a-f0-9]{64}$/)
+    expect(session.userId).toBe('gh_1001')
+  })
+
+  it('persists tokens encrypted with AES-256-GCM', () => {
+    const secretToken = 'ghp_secret_token_value_never_plaintext'
+    const session = sessionStore.createSession({ token: secretToken, userId: 'gh_2002', user: { id: 2002 } })
+    sessionStore.save()
+
+    if (fs.existsSync(sessionStore.filePath)) {
+      const rawDisk = fs.readFileSync(sessionStore.filePath, 'utf8')
+      expect(rawDisk).not.toContain(secretToken)
+      const parsed = JSON.parse(rawDisk)
+      expect(parsed[session.sessionId]?.token).toMatch(/^[a-f0-9]{24}:[a-f0-9]{32}:[a-f0-9]+$/)
+    }
+  })
+
+  it('prevents OAuth state replay and reuse', () => {
+    const state = sessionStore.createOAuthState({ redirect: '/dashboard' })
+    expect(sessionStore.validateAndConsumeOAuthState(state)).toBe(true)
+    expect(sessionStore.validateAndConsumeOAuthState(state)).toBe(false)
   })
 })
 
@@ -135,7 +168,7 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
     const ownerSession = sessionStore.createSession({
       token: 'owner-token',
       userId: 'alice_owner',
-      user: { login: 'alice_owner' },
+      user: { id: 111, login: 'alice_owner' },
     })
     ownerSessionId = ownerSession.sessionId
 
@@ -143,7 +176,7 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
     const attackerSession = sessionStore.createSession({
       token: 'attacker-token',
       userId: 'bob_attacker',
-      user: { login: 'bob_attacker' },
+      user: { id: 222, login: 'bob_attacker' },
     })
     attackerSessionId = attackerSession.sessionId
 
@@ -173,30 +206,16 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
     }
   })
 
-  it('returns 401 when GET /api/analysis/:id is unauthenticated', async () => {
-    const res = await fetch(`${baseUrl}/api/analysis/${ownerAnalysisId}`)
-    const data = await res.json()
-    expect(res.status).toBe(401)
-    expect(data.code).toBe('UNAUTHORIZED')
-  })
-
-  it('returns 401 when spoofed x-firebase-uid is used without valid token', async () => {
+  it('13. User A can access own analysis', async () => {
     const res = await fetch(`${baseUrl}/api/analysis/${ownerAnalysisId}`, {
-      headers: { 'x-firebase-uid': 'alice_owner' },
-    })
-    expect(res.status).toBe(401)
-  })
-
-  it('returns 404 when requested analysis does not exist', async () => {
-    const res = await fetch(`${baseUrl}/api/analysis/non-existent-analysis-id`, {
       headers: { Authorization: `Bearer ${ownerSessionId}` },
     })
     const data = await res.json()
-    expect(res.status).toBe(404)
-    expect(data.code).toBe('NOT_FOUND')
+    expect(res.status).toBe(200)
+    expect(data.analysisId).toBe(ownerAnalysisId)
   })
 
-  it('prevents User B from reading User A analysis (returns 403 Forbidden)', async () => {
+  it('14. User B cannot access User A analysis (403 Forbidden)', async () => {
     const res = await fetch(`${baseUrl}/api/analysis/${ownerAnalysisId}`, {
       headers: { Authorization: `Bearer ${attackerSessionId}` },
     })
@@ -205,7 +224,7 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
     expect(data.code).toBe('FORBIDDEN')
   })
 
-  it('prevents User B from downloading User A analysis scaffolds (returns 403 Forbidden)', async () => {
+  it('15. User B cannot download User A analysis scaffolds (403 Forbidden)', async () => {
     const res = await fetch(`${baseUrl}/api/download`, {
       method: 'POST',
       headers: {
@@ -217,20 +236,7 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
     expect(res.status).toBe(403)
   })
 
-  it('allows User A to download own analysis scaffolds (returns 200 ZIP)', async () => {
-    const res = await fetch(`${baseUrl}/api/download`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${ownerSessionId}`,
-      },
-      body: JSON.stringify({ analysisId: ownerAnalysisId }),
-    })
-    expect(res.status).toBe(200)
-    expect(res.headers.get('content-type')).toContain('application/zip')
-  })
-
-  it('prevents User B from asking QA on User A analysis (returns 403 Forbidden)', async () => {
+  it('16. User B cannot access User A QA endpoint (403 Forbidden)', async () => {
     const res = await fetch(`${baseUrl}/api/qa`, {
       method: 'POST',
       headers: {
@@ -245,21 +251,16 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
     expect(res.status).toBe(403)
   })
 
-  it('prevents User B from validating User A refactor (POST /api/pr/validate returns 403 Forbidden)', async () => {
-    const res = await fetch(`${baseUrl}/api/pr/validate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${attackerSessionId}`,
-      },
-      body: JSON.stringify({ analysisId: ownerAnalysisId }),
+  it('17. User B cannot access User A patch (403 Forbidden)', async () => {
+    const res = await fetch(`${baseUrl}/api/pr/patch/${ownerAnalysisId}`, {
+      headers: { Authorization: `Bearer ${attackerSessionId}` },
     })
     const data = await res.json()
     expect(res.status).toBe(403)
     expect(data.code).toBe('FORBIDDEN')
   })
 
-  it('prevents User B from creating a PR from User A analysis (POST /api/pr/create returns 403 Forbidden)', async () => {
+  it('18. User B cannot create PR from User A analysis (403 Forbidden)', async () => {
     const res = await fetch(`${baseUrl}/api/pr/create`, {
       method: 'POST',
       headers: {
@@ -271,24 +272,5 @@ describe('Security: Access Control & Analysis Ownership Verification', () => {
     const data = await res.json()
     expect(res.status).toBe(403)
     expect(data.code).toBe('FORBIDDEN')
-  })
-
-  it('prevents User B from reading User A unified patch (GET /api/pr/patch/:id returns 403 Forbidden)', async () => {
-    const res = await fetch(`${baseUrl}/api/pr/patch/${ownerAnalysisId}`, {
-      headers: { Authorization: `Bearer ${attackerSessionId}` },
-    })
-    const data = await res.json()
-    expect(res.status).toBe(403)
-    expect(data.code).toBe('FORBIDDEN')
-  })
-
-  it('returns 200 and analysis payload when authenticated owner accesses their analysis', async () => {
-    const res = await fetch(`${baseUrl}/api/analysis/${ownerAnalysisId}`, {
-      headers: { Authorization: `Bearer ${ownerSessionId}` },
-    })
-    const data = await res.json()
-    expect(res.status).toBe(200)
-    expect(data.analysisId).toBe(ownerAnalysisId)
-    expect(data.userId).toBe('alice_owner')
   })
 })

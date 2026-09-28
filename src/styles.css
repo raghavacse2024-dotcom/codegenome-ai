@@ -1034,6 +1034,43 @@ ul, ol { margin: 0 }
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+/* Scrollbar utility classes for AI Chatbot and prompt suggestions */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.sleek-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.sleek-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sleek-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+.sleek-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 197, 94, 0.4);
+}
+.sleek-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+[data-theme='clean-light'] .sleek-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+[data-theme='clean-light'] .sleek-scrollbar {
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+
 .qa-suggestions-bar {
   display: flex;
   gap: 6px;

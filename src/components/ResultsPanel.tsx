@@ -41,7 +41,7 @@ function ScaffoldCard({ file, index }: { file: Scaffold; index: number }) {
   )
 }
 
-export function ResultsPanel({ analysis }: { analysis: Analysis }) {
+export function ResultsPanel({ analysis, user }: { analysis: Analysis; user?: { login?: string; name?: string } | null }) {
   const [selectedHotspot, setSelectedHotspot] = useState<Hotspot | null>(null)
   const [prModalOpen, setPrModalOpen] = useState(false)
   const [refactorTab, setRefactorTab] = useState<'diff' | 'scaffolds'>('diff')
@@ -84,7 +84,7 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
       initial="hidden"
       animate="visible"
     >
-      <DemoModeBadge isDemo={analysis.isDemo} />
+      <DemoModeBadge isDemo={analysis.isDemo} user={user} />
 
       {/* Transparent Repository Sampling Notice */}
       <div 
