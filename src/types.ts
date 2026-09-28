@@ -98,7 +98,16 @@ export type RefactorValidation = {
 
 export type PrState = 'PR_ELIGIBLE' | 'PR_BLOCKED' | 'HUMAN_REVIEW_REQUIRED' | 'VALIDATION_FAILED' | 'POLICY_UNKNOWN'
 
+export type ContributionPolicyState = 'ALLOWED' | 'BLOCKED' | 'UNKNOWN'
+
+export type GitHubPrStatus =
+  | 'NOT_ATTEMPTED'
+  | 'BRANCH_CREATED_PR_NOT_CREATED'
+  | 'PR_CREATED'
+  | 'GITHUB_OPERATION_FAILED'
+
 export type ContributionPolicyResult = {
+  status: ContributionPolicyState
   isBlocked: boolean
   policyFile: string | null
   ruleSnippet: string | null
@@ -108,11 +117,14 @@ export type ContributionPolicyResult = {
 
 export type PullRequestResult = {
   success: boolean
-  mode: 'live' | 'ready' | 'simulated' | 'blocked' | 'validation_failed'
+  mode: 'live' | 'ready' | 'simulated' | 'blocked' | 'validation_failed' | 'review_required'
+  githubStatus?: GitHubPrStatus
+  prCreated?: boolean
   state?: PrState
   policy?: ContributionPolicyResult
   pushed?: boolean
   prUrl?: string | null
+  compareUrl?: string | null
   prNumber?: number
   branch: string
   baseBranch: string

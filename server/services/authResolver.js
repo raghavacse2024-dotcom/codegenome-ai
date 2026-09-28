@@ -95,8 +95,6 @@ export async function resolveAuthenticatedUser(req) {
   let candidate = null
   if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
     candidate = authHeader.slice(7).trim()
-  } else if (typeof req.query?.token === 'string' && req.query.token.trim()) {
-    candidate = req.query.token.trim()
   }
 
   // 1. Valid Server-Side Session Lookup (CodeGenome GitHub session: cg_sess_...)

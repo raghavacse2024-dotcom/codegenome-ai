@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { validateRefactor } from '../server/services/refactorValidator.js'
 
 describe('Refactor Validation Sandbox', () => {
-  it('validates and approves safe, syntactically correct refactoring scaffolds with test suites', async () => {
+  it('statically validates refactoring scaffolds and marks unexecuted build/tests as not_executed requiring review', async () => {
     const files = [
       {
         path: 'src/features/calculator.ts',
@@ -25,17 +25,27 @@ describe('calculator', () => {
       },
     ]
 
-    const result = await validateRefactor({ files })
-    expect(result.status).toBe('verified')
-    expect(result.validation.safeToPropose).toBe(true)
-    expect(result.validation.lint).toBe('passed')
-    expect(result.validation.typecheck).toBe('passed')
-    expect(result.validation.syntaxValidation).toBe('passed')
-    expect(result.validation.staticValidation).toBe('passed')
-    expect(result.validation.testFrameworkValidation).toBe('passed')
-    expect(result.validation.tests).toBe('not_executed')
-    expect(result.validation.build).toBe('not_executed')
-    expect(result.failedStep).toBeNull()
+    const unexecutedResult = await validateRefactor({ files })
+    expect(unexecutedResult.validation.lint).toBe('passed')
+    expect(unexecutedResult.validation.typecheck).toBe('passed')
+    expect(unexecutedResult.validation.syntaxValidation).toBe('passed')
+    expect(unexecutedResult.validation.staticValidation).toBe('passed')
+    expect(unexecutedResult.validation.testFrameworkValidation).toBe('passed')
+    expect(unexecutedResult.validation.tests).toBe('not_executed')
+    expect(unexecutedResult.validation.build).toBe('not_executed')
+    expect(unexecutedResult.validation.safeToPropose).toBe(false)
+    expect(unexecutedResult.state).toBe('POLICY_UNKNOWN')
+
+    const executedResult = await validateRefactor({
+      files,
+      policyFiles: [{ path: 'CONTRIBUTING.md', content: 'PRs welcome' }],
+      simulateExecution: true,
+    })
+    expect(executedResult.status).toBe('verified')
+    expect(executedResult.validation.safeToPropose).toBe(true)
+    expect(executedResult.validation.build).toBe('passed')
+    expect(executedResult.validation.tests).toBe('passed')
+    expect(executedResult.state).toBe('PR_ELIGIBLE')
   })
 
   it('rejects refactor with syntax errors during lint stage', async () => {

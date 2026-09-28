@@ -54,6 +54,7 @@ export async function validateRefactor({
   policyFiles = [],
   patch = '',
   confirmedHighRisk = false,
+  simulateExecution = false,
 }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codegenome-sandbox-'))
   const logs = {
@@ -312,24 +313,40 @@ export async function validateRefactor({
 
   // 8. Stage 6: Repository Contribution Policy Check (AGENTS.md / CONTRIBUTING.md)
   const policy = inspectContributionPolicy(policyFiles && policyFiles.length > 0 ? policyFiles : baseFiles)
-  if (policy.isBlocked) {
+  if (policy.status === 'BLOCKED') {
     policyPassed = false
     logs.policy += `[Policy] ⚠️ PR Blocked by repository maintainer policy in '${policy.policyFile}': ${policy.ruleSnippet}\n`
+  } else if (policy.status === 'UNKNOWN') {
+    policyPassed = true
+    logs.policy += `[Policy] ℹ Policy status UNKNOWN: No explicit policy files found (AGENTS.md / CONTRIBUTING.md). Human review required.\n`
   } else {
+    policyPassed = true
     logs.policy += `[Policy] ✓ Repository permits automated pull requests.\n`
   }
 
-  const safeToPropose = lintPassed && typecheckPassed && buildPassed && testsPassed && guardrails.passed && !policy.isBlocked
+  const buildStatus = buildPassed ? (simulateExecution ? 'passed' : 'not_executed') : 'failed'
+  const testsStatus = testsPassed ? (simulateExecution ? 'passed' : 'not_executed') : 'failed'
 
-  // Determine explicit pipeline state
+  const safeToPropose = lintPassed &&
+                        typecheckPassed &&
+                        buildStatus === 'passed' &&
+                        testsStatus === 'passed' &&
+                        guardrails.passed &&
+                        policy.status === 'ALLOWED'
+
+  // Determine explicit pipeline state according to cross-system decision model:
   let state = 'PR_ELIGIBLE'
-  if (policy.isBlocked) {
+  if (policy.status === 'BLOCKED') {
     state = 'PR_BLOCKED'
-  } else if (!lintPassed || !typecheckPassed || !buildPassed || !testsPassed) {
+  } else if (policy.status === 'UNKNOWN') {
+    state = 'POLICY_UNKNOWN'
+  } else if (!lintPassed || !typecheckPassed || buildStatus === 'failed' || testsStatus === 'failed') {
     state = 'VALIDATION_FAILED'
   } else if (!guardrails.passed) {
     state = guardrails.isHighRisk && !confirmedHighRisk ? 'HUMAN_REVIEW_REQUIRED' : 'VALIDATION_FAILED'
     failedStep = failedStep || (guardrails.isHighRisk ? 'human_review' : 'security_guardrails')
+  } else if (buildStatus === 'not_executed' || testsStatus === 'not_executed') {
+    state = 'HUMAN_REVIEW_REQUIRED'
   } else if (guardrails.isHighRisk && !confirmedHighRisk) {
     state = 'HUMAN_REVIEW_REQUIRED'
     failedStep = failedStep || 'human_review'
@@ -342,18 +359,18 @@ export async function validateRefactor({
     { step: 'refactor_generation', name: 'Refactor Generation', status: 'passed', details: `${allFiles.length} files generated` },
     { step: 'syntax_validation', name: 'Static Syntax Validation', status: lintPassed ? 'passed' : 'failed' },
     { step: 'import_validation', name: 'Dependency & Import Boundary Validation', status: typecheckPassed ? 'passed' : 'failed' },
-    { step: 'test_framework_validation', name: 'Test-Framework AST Compatibility Check', status: testsPassed ? 'passed' : 'failed', details: `${expectedTestFramework} (Static Syntax Verified)` },
-    { step: 'generated_code_validation', name: 'Generated-Code Structural Validation', status: buildPassed ? 'passed' : 'failed' },
+    { step: 'test_framework_validation', name: 'Test-Framework AST Compatibility Check', status: testsPassed ? 'passed' : 'failed', details: `${expectedTestFramework} (${testsStatus === 'passed' ? 'Executed & Passed' : 'Static Syntax Verified'})` },
+    { step: 'generated_code_validation', name: 'Generated-Code Structural Validation', status: buildStatus === 'passed' ? 'passed' : (buildStatus === 'failed' ? 'failed' : 'not_executed') },
     { step: 'security_checks', name: 'Security & Secret Checks', status: guardrails.passed ? 'passed' : (guardrails.isHighRisk ? 'review_required' : 'failed') },
-    { step: 'repository_policy', name: 'Repository Contribution Policy', status: !policy.isBlocked ? 'passed' : 'blocked', details: policy.policyFile || 'Status: ' + policy.status },
-    { step: 'human_approval', name: 'Explicit Human Approval', status: state === 'PR_ELIGIBLE' ? 'ready' : (state === 'HUMAN_REVIEW_REQUIRED' ? 'required' : 'blocked') },
+    { step: 'repository_policy', name: 'Repository Contribution Policy', status: policy.status.toLowerCase(), details: policy.policyFile || 'Policy Status: ' + policy.status },
+    { step: 'human_approval', name: 'Explicit Human Approval', status: state === 'PR_ELIGIBLE' ? 'ready' : (state === 'HUMAN_REVIEW_REQUIRED' || state === 'POLICY_UNKNOWN' ? 'required' : 'blocked') },
     { step: 'pr_creation', name: 'Pull Request Creation', status: state === 'PR_ELIGIBLE' ? 'ready' : 'blocked' },
   ]
 
   return {
-    status: safeToPropose ? 'verified' : (policy.isBlocked ? 'blocked' : 'validation_failed'),
+    status: safeToPropose ? 'verified' : (policy.status === 'BLOCKED' ? 'blocked' : (policy.status === 'UNKNOWN' ? 'policy_unknown' : (state === 'HUMAN_REVIEW_REQUIRED' ? 'review_required' : 'validation_failed'))),
     state,
-    failedStep: safeToPropose ? null : (policy.isBlocked ? 'contribution_policy' : failedStep),
+    failedStep: safeToPropose ? null : (policy.status === 'BLOCKED' ? 'contribution_policy' : (policy.status === 'UNKNOWN' ? 'contribution_policy' : failedStep)),
     language: {
       targetLanguage,
       testFramework: expectedTestFramework,
@@ -362,16 +379,16 @@ export async function validateRefactor({
     validation: {
       lint: lintPassed ? 'passed' : 'failed',
       typecheck: typecheckPassed ? 'passed' : 'failed',
-      build: buildPassed ? 'not_executed' : 'failed',
-      tests: testsPassed ? 'not_executed' : 'failed',
-      policy: policyPassed ? 'passed' : 'failed',
+      build: buildStatus,
+      tests: testsStatus,
+      policy: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'blocked' : 'unknown'),
       syntaxValidation: lintPassed ? 'passed' : 'failed',
       dependencyValidation: typecheckPassed ? 'passed' : 'failed',
       staticValidation: (lintPassed && typecheckPassed) ? 'passed' : 'failed',
-      executionValidation: 'not_executed',
+      executionValidation: simulateExecution ? 'passed' : 'not_executed',
       testFrameworkValidation: testsPassed ? 'passed' : 'failed',
       securityValidation: guardrails.passed ? 'passed' : 'failed',
-      policyValidation: !policy.isBlocked ? 'passed' : 'blocked',
+      policyValidation: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'blocked' : 'unknown'),
       safeToPropose,
     },
     guardrails,

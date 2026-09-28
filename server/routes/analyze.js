@@ -29,6 +29,10 @@ analyzeRouter.post('/analyze', analyzeRateLimiter, async (request, response, nex
  * Streams live agent lifecycle events, progress ticks, and final complete analysis payload.
  */
 async function handleAnalyzeStream(request, response, next) {
+  if (request.query?.token) {
+    return response.status(401).json({ error: 'Authentication tokens in query parameters are strictly forbidden. Send credentials in Authorization header.' })
+  }
+
   // Set SSE headers
   response.setHeader('Content-Type', 'text/event-stream')
   response.setHeader('Cache-Control', 'no-cache, no-transform')

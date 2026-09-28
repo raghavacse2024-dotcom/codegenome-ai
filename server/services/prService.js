@@ -114,13 +114,24 @@ export async function createPullRequest({
   const cliCommand = `git checkout -b ${safeBranch} && git apply --whitespace=fix patch.diff`
 
   if (!validationResult.validation.safeToPropose) {
+    let mode = 'validation_failed'
+    if (validationResult.policy?.status === 'BLOCKED') mode = 'blocked'
+    else if (validationResult.policy?.status === 'UNKNOWN') mode = 'review_required'
+    else if (validationResult.state === 'HUMAN_REVIEW_REQUIRED') mode = 'review_required'
+
     return {
       success: false,
-      mode: validationResult.policy?.isBlocked ? 'blocked' : 'validation_failed',
+      mode,
+      githubStatus: 'NOT_ATTEMPTED',
+      prCreated: false,
+      prUrl: null,
+      compareUrl: null,
       state: validationResult.state,
-      error: validationResult.policy?.isBlocked
+      error: validationResult.policy?.status === 'BLOCKED'
         ? validationResult.policy.explanation
-        : `Refactor validation failed at step '${validationResult.failedStep}'. PR proposal blocked.`,
+        : (validationResult.policy?.status === 'UNKNOWN'
+            ? validationResult.policy.explanation
+            : `Refactor validation failed or requires human review at step '${validationResult.failedStep || 'execution_validation'}'. PR proposal blocked.`),
       branch: safeBranch,
       cliCommand,
       patch,
@@ -316,32 +327,39 @@ export async function createPullRequest({
           success: true,
           mode: 'live',
           githubStatus: 'PR_CREATED',
+          prCreated: true,
           state: 'PR_ELIGIBLE',
           pushed: true,
           prUrl: prData.html_url,
+          compareUrl: null,
           branch: finalBranch,
           baseBranch: targetBaseBranch,
           title: prTitle,
           body: prBody,
           cliCommand,
           validation: validationResult.validation,
+          policy: validationResult.policy,
           message: `Pull Request #${prData.number} successfully created on GitHub!`,
         }
       } else {
         const compareUrl = `https://github.com/${owner}/${repository}/compare/${targetBaseBranch}...${headBranch}?expand=1`
         return {
-          success: true,
+          success: false,
           mode: 'live',
           githubStatus: 'BRANCH_CREATED_PR_NOT_CREATED',
-          state: 'PR_ELIGIBLE',
+          prCreated: false,
+          state: 'HUMAN_REVIEW_REQUIRED',
           pushed: true,
-          prUrl: compareUrl,
+          prUrl: null,
+          compareUrl,
           branch: finalBranch,
           baseBranch: targetBaseBranch,
           title: prTitle,
           body: prBody,
           cliCommand,
           validation: validationResult.validation,
+          policy: validationResult.policy,
+          error: `Branch '${finalBranch}' was pushed to GitHub, but Pull Request creation failed. Click compare URL to complete PR manually.`,
           message: `Branch '${finalBranch}' successfully created and pushed to GitHub! Click to review and open your Pull Request.`,
         }
       }
@@ -351,10 +369,12 @@ export async function createPullRequest({
         success: false,
         mode: 'live',
         githubStatus: 'GITHUB_OPERATION_FAILED',
-        state: 'PR_ELIGIBLE',
+        prCreated: false,
+        state: 'VALIDATION_FAILED',
         pushed: false,
         error: `GitHub API operation failed: ${error.message}`,
         prUrl: null,
+        compareUrl: null,
         branch: safeBranch,
         baseBranch: targetBaseBranch,
         title: prTitle,
@@ -362,6 +382,7 @@ export async function createPullRequest({
         patch,
         cliCommand,
         validation: validationResult.validation,
+        policy: validationResult.policy,
         message: `GitHub API operation failed: ${error.message}. Changes remain validated and can be applied locally using the Git CLI command or patch below.`,
       }
     }
@@ -369,19 +390,25 @@ export async function createPullRequest({
 
   // Fallback when live API push token is not provided (unattempted live push)
   return {
-    success: true,
+    success: validationResult.validation.safeToPropose,
     mode: 'simulated',
     githubStatus: 'NOT_ATTEMPTED',
-    state: 'PR_ELIGIBLE',
+    prCreated: false,
+    state: validationResult.state,
     pushed: false,
     prUrl: null,
+    compareUrl: null,
     branch: safeBranch,
     baseBranch: defaultBranch,
     title: prTitle,
     body: prBody,
-    patch,
     cliCommand,
+    patch,
     validation: validationResult.validation,
-    message: `Refactor branch '${safeBranch}' prepared and sandbox-verified for ${owner}/${repository}! Enter a GitHub Personal Access Token to fork and push automatically, or use the Git CLI patch below.`,
+    policy: validationResult.policy,
+    allowsManualExport: true,
+    message: validationResult.validation.safeToPropose
+      ? 'Refactor branch prepared and sandbox-verified. Ready to propose Pull Request upon GitHub authorization.'
+      : 'Refactor generated and statically validated. Human review required before PR proposal.',
   }
 }

@@ -230,85 +230,88 @@ export interface StreamCallbacks {
 }
 
 /**
- * Real-time Server-Sent Events (SSE) repository analysis with resilient fallback.
+ * Real-time Server-Sent Events (SSE) repository analysis using fetch streaming.
+ * Sends credentials in Authorization header to prevent exposing tokens in URLs.
  */
 export async function analyzeRepositoryStream(
   repositoryUrl: string,
   callbacks: StreamCallbacks = {}
 ): Promise<Analysis> {
-  let token: string | null = null
-  if (auth?.currentUser) {
-    try {
-      token = await auth.currentUser.getIdToken()
-    } catch {}
-  }
-  if (!token) {
-    token = getSessionToken() || getGitHubPat()
-  }
+  const authHeaders = await getAuthHeaders()
 
-  return new Promise((resolve) => {
-    const queryParams = new URLSearchParams({ url: repositoryUrl })
-    if (token) {
-      queryParams.set('token', token)
+  try {
+    const response = await fetch(`${API_URL}/api/analyze/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({ repositoryUrl }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`SSE stream failed with status ${response.status}`)
     }
 
-    const sseUrl = `${API_URL}/api/analyze/stream?${queryParams.toString()}`
-    let eventSource: EventSource | null = null
-    let hasResolved = false
+    if (!response.body) {
+      return await analyzeRepository(repositoryUrl)
+    }
 
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finalAnalysis: Analysis | null = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() || ''
+
+      for (const part of parts) {
+        if (!part.trim()) continue
+        let eventType = 'message'
+        let dataStr = ''
+
+        for (const line of part.split('\n')) {
+          if (line.startsWith('event: ')) {
+            eventType = line.slice(7).trim()
+          } else if (line.startsWith('data: ')) {
+            dataStr = line.slice(6)
+          }
+        }
+
+        if (!dataStr) continue
+
+        try {
+          const parsed = JSON.parse(dataStr)
+          if (eventType === 'status') {
+            callbacks.onStatus?.(parsed)
+          } else if (eventType === 'agent_event') {
+            callbacks.onAgentEvent?.(parsed)
+          } else if (eventType === 'complete') {
+            finalAnalysis = parsed as Analysis
+          } else if (eventType === 'error') {
+            throw new Error(parsed.error || 'Analysis streaming error')
+          }
+        } catch (err: any) {
+          if (eventType === 'error') throw err
+        }
+      }
+    }
+
+    if (finalAnalysis) return finalAnalysis
+    return await analyzeRepository(repositoryUrl)
+  } catch (err) {
+    console.warn('[API] analyzeRepositoryStream failed, falling back:', err)
     try {
-      eventSource = new EventSource(sseUrl)
-
-      eventSource.addEventListener('status', (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          callbacks.onStatus?.(data)
-        } catch {}
-      })
-
-      eventSource.addEventListener('agent_event', (e) => {
-        try {
-          const agentEvent: AgentEvent = JSON.parse(e.data)
-          callbacks.onAgentEvent?.(agentEvent)
-        } catch {}
-      })
-
-      eventSource.addEventListener('complete', (e) => {
-        try {
-          hasResolved = true
-          const analysis: Analysis = JSON.parse(e.data)
-          eventSource?.close()
-          resolve(analysis)
-        } catch (err) {
-          eventSource?.close()
-          resolve(createClientFallbackAnalysis(repositoryUrl))
-        }
-      })
-
-      eventSource.addEventListener('error', () => {
-        if (!hasResolved) {
-          eventSource?.close()
-          analyzeRepository(repositoryUrl)
-            .then((analysis) => {
-              hasResolved = true
-              resolve(analysis)
-            })
-            .catch(() => {
-              hasResolved = true
-              resolve(createClientFallbackAnalysis(repositoryUrl))
-            })
-        }
-      })
-
-      eventSource.addEventListener('done', () => {
-        eventSource?.close()
-      })
+      return await analyzeRepository(repositoryUrl)
     } catch {
-      analyzeRepository(repositoryUrl)
-        .then((analysis) => resolve(analysis))
-        .catch(() => resolve(createClientFallbackAnalysis(repositoryUrl)))
+      return createClientFallbackAnalysis(repositoryUrl)
     }
-  })
+  }
 }
 
 /**

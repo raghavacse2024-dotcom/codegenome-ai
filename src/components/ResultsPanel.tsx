@@ -258,7 +258,7 @@ export function ResultsPanel({ analysis, user }: { analysis: Analysis; user?: { 
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase inline-flex items-center gap-1 ${
                       prState === 'PR_BLOCKED'
                         ? 'bg-red-500/20 text-red-400 border border-red-500/40'
-                        : prState === 'HUMAN_REVIEW_REQUIRED'
+                        : (prState === 'HUMAN_REVIEW_REQUIRED' || prState === 'POLICY_UNKNOWN')
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                         : prState === 'VALIDATION_FAILED'
                         ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
@@ -266,7 +266,7 @@ export function ResultsPanel({ analysis, user }: { analysis: Analysis; user?: { 
                     }`}>
                       {prState === 'PR_BLOCKED' && <ShieldAlert size={10} />}
                       {prState === 'PR_ELIGIBLE' && <CheckCircle size={10} />}
-                      {prState === 'HUMAN_REVIEW_REQUIRED' && <AlertTriangle size={10} />}
+                      {(prState === 'HUMAN_REVIEW_REQUIRED' || prState === 'POLICY_UNKNOWN') && <AlertTriangle size={10} />}
                       {prState === 'VALIDATION_FAILED' && <AlertCircle size={10} />}
                       {prState}
                     </span>

@@ -80,17 +80,19 @@ describe('Requirement 1 & 5: Repository with no contribution restrictions', () =
 
     const policy = inspectContributionPolicy(files)
     expect(policy.isBlocked).toBe(false)
+    expect(policy.status).toBe('ALLOWED')
     expect(policy.state).toBe('PR_ELIGIBLE')
-    expect(policy.policyFile).toBeNull()
+    expect(policy.policyFile).toBe('CONTRIBUTING.md')
     expect(policy.ruleSnippet).toBeNull()
-    expect(policy.explanation).toContain('permits pull requests')
+    expect(policy.explanation).toContain('permits automated pull requests')
     expect(policy.allowsManualExport).toBe(true)
   })
 
-  it('handles empty repository file list gracefully without blocking', () => {
+  it('classifies policy as UNKNOWN when no policy file exists', () => {
     const policy = inspectContributionPolicy([])
+    expect(policy.status).toBe('UNKNOWN')
+    expect(policy.state).toBe('POLICY_UNKNOWN')
     expect(policy.isBlocked).toBe(false)
-    expect(policy.state).toBe('PR_ELIGIBLE')
   })
 })
 
@@ -429,15 +431,18 @@ describe('Feature Module', () => {
       owner: 'acme-inc',
       repository: 'permissive-repo',
       files,
-      baseFiles,
+      baseFiles: [
+        ...baseFiles,
+        { path: 'CONTRIBUTING.md', content: 'Automated contributions welcome.' }
+      ],
       targetPath: 'src/feature.ts',
       refactoredTarget: 'import { createFeature } from "./feature_module";\nexport function run() { return "original"; }\n',
       patch: '@@ -1,1 +1,2 @@\n+import { createFeature } from "./feature_module";\n',
     })
 
-    expect(prResult.success).toBe(true)
-    expect(prResult.state).toBe('PR_ELIGIBLE')
-    expect(prResult.validation.safeToPropose).toBe(true)
+    expect(prResult.success).toBe(false)
+    expect(prResult.state).toBe('HUMAN_REVIEW_REQUIRED')
+    expect(prResult.validation.safeToPropose).toBe(false)
     expect(prResult.validation.lint).toBe('passed')
     expect(prResult.validation.typecheck).toBe('passed')
     expect(prResult.validation.syntaxValidation).toBe('passed')

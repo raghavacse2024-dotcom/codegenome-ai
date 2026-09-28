@@ -96,10 +96,10 @@ export function inspectContributionPolicy(files = []) {
     return {
       status: 'UNKNOWN',
       isBlocked: false,
-      state: 'PR_ELIGIBLE',
+      state: 'POLICY_UNKNOWN',
       policyFile: null,
       ruleSnippet: null,
-      explanation: 'No explicit contribution policy file found (AGENTS.md / CONTRIBUTING.md). Policy status: UNKNOWN. Human review recommended.',
+      explanation: 'No sufficient repository contribution policy was found to determine whether automated contribution is permitted.',
       allowsManualExport: true,
     }
   }
@@ -114,10 +114,10 @@ export function inspectContributionPolicy(files = []) {
     return {
       status: 'UNKNOWN',
       isBlocked: false,
-      state: 'PR_ELIGIBLE',
+      state: 'POLICY_UNKNOWN',
       policyFile: null,
       ruleSnippet: null,
-      explanation: 'No explicit contribution policy file found (AGENTS.md / CONTRIBUTING.md). Policy status: UNKNOWN. Human review recommended.',
+      explanation: 'No sufficient repository contribution policy was found to determine whether automated contribution is permitted.',
       allowsManualExport: true,
     }
   }
@@ -150,9 +150,9 @@ export function inspectContributionPolicy(files = []) {
     status: 'ALLOWED',
     isBlocked: false,
     state: 'PR_ELIGIBLE',
-    policyFile: null,
+    policyFile: policyFiles[0].path,
     ruleSnippet: null,
-    explanation: 'Repository contribution policy permits pull requests.',
+    explanation: `Repository contribution policy in '${policyFiles[0].path}' permits automated pull requests.`,
     allowsManualExport: true,
   }
 }
