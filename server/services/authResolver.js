@@ -240,12 +240,15 @@ export function assertAnalysisOwnership(analysis, user) {
   const currentUserId = String(user.userId).trim()
   const recordUserId = analysis.userId ? String(analysis.userId).trim() : null
 
-  // If analysis has a registered owner, enforce strict match
+  // Enforce strict canonical ownership check: analysis.userId === authenticatedUser.userId
   if (recordUserId) {
-    const isOwner = (recordUserId === currentUserId) ||
-                    (user.firebaseUid && recordUserId === user.firebaseUid) ||
-                    (user.githubUserId && recordUserId === `gh_${user.githubUserId}`) ||
-                    (user.githubLogin && recordUserId === user.githubLogin) // Legacy migration fallback
+    let isOwner = (recordUserId === currentUserId)
+
+    // Legacy migration compatibility: if record used old GitHub username, migrate recordUserId to canonical gh_<numeric_id>
+    if (!isOwner && user.githubLogin && recordUserId === user.githubLogin) {
+      isOwner = true
+      analysis.userId = currentUserId
+    }
 
     if (!isOwner) {
       const err = new Error('Access forbidden: you do not have permission to view this analysis.')

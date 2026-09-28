@@ -94,11 +94,12 @@ export function checkContentForPolicyRestrictions(content) {
 export function inspectContributionPolicy(files = []) {
   if (!Array.isArray(files) || files.length === 0) {
     return {
+      status: 'UNKNOWN',
       isBlocked: false,
       state: 'PR_ELIGIBLE',
       policyFile: null,
       ruleSnippet: null,
-      explanation: 'No repository contribution restrictions found.',
+      explanation: 'No explicit contribution policy file found (AGENTS.md / CONTRIBUTING.md). Policy status: UNKNOWN. Human review recommended.',
       allowsManualExport: true,
     }
   }
@@ -108,6 +109,18 @@ export function inspectContributionPolicy(files = []) {
     const cleanPath = (f.path || '').replace(/^\/+/, '')
     return POLICY_FILE_PATTERNS.some((pat) => pat.test(cleanPath))
   })
+
+  if (policyFiles.length === 0) {
+    return {
+      status: 'UNKNOWN',
+      isBlocked: false,
+      state: 'PR_ELIGIBLE',
+      policyFile: null,
+      ruleSnippet: null,
+      explanation: 'No explicit contribution policy file found (AGENTS.md / CONTRIBUTING.md). Policy status: UNKNOWN. Human review recommended.',
+      allowsManualExport: true,
+    }
+  }
 
   // Prioritize AGENTS.md, then CONTRIBUTING.md
   policyFiles.sort((a, b) => {
@@ -122,6 +135,7 @@ export function inspectContributionPolicy(files = []) {
     const { matches, ruleSnippet } = checkContentForPolicyRestrictions(file.content || '')
     if (matches) {
       return {
+        status: 'BLOCKED',
         isBlocked: true,
         state: 'PR_BLOCKED',
         policyFile: file.path,
@@ -133,6 +147,7 @@ export function inspectContributionPolicy(files = []) {
   }
 
   return {
+    status: 'ALLOWED',
     isBlocked: false,
     state: 'PR_ELIGIBLE',
     policyFile: null,

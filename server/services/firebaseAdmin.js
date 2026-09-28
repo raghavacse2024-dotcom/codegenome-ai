@@ -23,7 +23,7 @@ export function getFirebaseAdmin() {
     }
 
     const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json')
-    let projectId = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'gen-lang-client-0720005700'
+    let projectId = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT
     let databaseId = undefined
 
     if (fs.existsSync(configPath)) {
@@ -32,6 +32,13 @@ export function getFirebaseAdmin() {
         if (rawConfig.projectId) projectId = rawConfig.projectId
         if (rawConfig.firestoreDatabaseId) databaseId = rawConfig.firestoreDatabaseId
       } catch {}
+    }
+
+    if (!projectId) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('Missing required production configuration: FIREBASE_PROJECT_ID, GCLOUD_PROJECT, or firebase-applet-config.json must be set.')
+      }
+      projectId = 'codegenome-dev-project'
     }
 
     adminApp = admin.initializeApp({

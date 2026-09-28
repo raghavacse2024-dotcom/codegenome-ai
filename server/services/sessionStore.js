@@ -107,7 +107,7 @@ class MemorySessionStore {
             this.sessions.set(id, {
               sessionId: id,
               token: decryptedToken,
-              userId: record.userId || (record.user?.id ? `gh_${record.user.id}` : record.user?.login) || null,
+              userId: record.userId || (record.user?.id ? `gh_${record.user.id}` : null),
               user: record.user || null,
               createdAt: record.createdAt || record.timestamp || now,
               expiresAt: record.expiresAt || (now + this.SESSION_TTL_MS),
@@ -158,7 +158,7 @@ class MemorySessionStore {
   createSession({ token, user, userId }) {
     const sessionId = this.generateSessionId()
     const now = Date.now()
-    const canonicalUserId = userId || user?.login || null
+    const canonicalUserId = userId || (user?.id ? `gh_${user.id}` : null)
 
     const sessionData = {
       sessionId,
@@ -198,8 +198,8 @@ class MemorySessionStore {
 
     if (updates.user) {
       session.user = { ...session.user, ...updates.user }
-      if (!session.userId && updates.user.login) {
-        session.userId = updates.user.login
+      if (!session.userId && updates.user.id) {
+        session.userId = `gh_${updates.user.id}`
       }
     }
     if (updates.token) {

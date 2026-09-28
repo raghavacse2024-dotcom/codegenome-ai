@@ -315,6 +315,7 @@ export async function createPullRequest({
         return {
           success: true,
           mode: 'live',
+          githubStatus: 'PR_CREATED',
           state: 'PR_ELIGIBLE',
           pushed: true,
           prUrl: prData.html_url,
@@ -331,17 +332,17 @@ export async function createPullRequest({
         return {
           success: true,
           mode: 'live',
-          githubStatus: 'BRANCH_CREATED',
+          githubStatus: 'BRANCH_CREATED_PR_NOT_CREATED',
           state: 'PR_ELIGIBLE',
           pushed: true,
           prUrl: compareUrl,
-          branch: safeBranch,
+          branch: finalBranch,
           baseBranch: targetBaseBranch,
           title: prTitle,
           body: prBody,
           cliCommand,
           validation: validationResult.validation,
-          message: `Branch '${safeBranch}' successfully created and pushed to GitHub! Click to review and open your Pull Request.`,
+          message: `Branch '${finalBranch}' successfully created and pushed to GitHub! Click to review and open your Pull Request.`,
         }
       }
     } catch (error) {
@@ -349,7 +350,7 @@ export async function createPullRequest({
       return {
         success: false,
         mode: 'live',
-        githubStatus: 'FAILED',
+        githubStatus: 'GITHUB_OPERATION_FAILED',
         state: 'PR_ELIGIBLE',
         pushed: false,
         error: `GitHub API operation failed: ${error.message}`,

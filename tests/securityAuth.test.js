@@ -9,7 +9,9 @@ import { prRouter } from '../server/routes/pr.js'
 import { downloadRouter } from '../server/routes/download.js'
 import { qaRouter } from '../server/routes/qa.js'
 import { errorHandler } from '../server/middleware/errorHandler.js'
-import { resolveAuthenticatedUser, getCanonicalUserId } from '../server/services/authResolver.js'
+import { resolveAuthenticatedUser, getCanonicalUserId, assertAnalysisOwnership } from '../server/services/authResolver.js'
+import { getAppOrigin } from '../server/index.js'
+import { inspectContributionPolicy } from '../server/services/contributionPolicyService.js'
 
 describe('Security: Cryptographic Firebase Token & Identity Verification', () => {
   it('1. verifies valid Firebase ID token and resolves authenticated user', async () => {
@@ -111,6 +113,32 @@ describe('Security: Cryptographic Firebase Token & Identity Verification', () =>
       githubLogin: 'attacker_login',
     }
     expect(getCanonicalUserId(identity)).toBe('verified_fb_uid')
+  })
+
+  it('12. validates postMessage target origin cleanly via getAppOrigin', () => {
+    const req = { headers: { origin: 'https://codegenome.ai' } }
+    expect(getAppOrigin(req)).toBe('https://codegenome.ai')
+  })
+
+  it('13. classifies contribution policy as ALLOWED, BLOCKED, or UNKNOWN', () => {
+    // No policy files -> UNKNOWN
+    const unknownRes = inspectContributionPolicy([])
+    expect(unknownRes.status).toBe('UNKNOWN')
+    expect(unknownRes.isBlocked).toBe(false)
+
+    // Policy with AI PR ban -> BLOCKED
+    const blockedRes = inspectContributionPolicy([
+      { path: 'AGENTS.md', content: 'No AI-generated PRs allowed here.' }
+    ])
+    expect(blockedRes.status).toBe('BLOCKED')
+    expect(blockedRes.isBlocked).toBe(true)
+
+    // Policy permitting PRs -> ALLOWED
+    const allowedRes = inspectContributionPolicy([
+      { path: 'CONTRIBUTING.md', content: 'Contributions and pull requests are welcome!' }
+    ])
+    expect(allowedRes.status).toBe('ALLOWED')
+    expect(allowedRes.isBlocked).toBe(false)
   })
 })
 

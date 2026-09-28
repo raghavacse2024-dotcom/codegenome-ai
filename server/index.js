@@ -33,8 +33,54 @@ app.all('/api/*', (req, res) => {
   res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` })
 })
 
+/**
+ * Resolves and validates a clean HTTP/HTTPS application origin for secure OAuth postMessage calls.
+ * Prevents wildcard '*' postMessage target origins in production.
+ * @param {import('express').Request} [req]
+ * @returns {string}
+ */
+export function getAppOrigin(req) {
+  // Check client request headers first if present
+  const headerOrigin = req?.headers?.origin || (req?.headers?.referer ? new URL(req.headers.referer).origin : null)
+  if (headerOrigin) {
+    try {
+      const parsed = new URL(headerOrigin)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return parsed.origin
+      }
+    } catch {}
+  }
+
+  const configured = process.env.APP_URL || process.env.FRONTEND_URL || process.env.VITE_API_URL
+  if (configured && typeof configured === 'string') {
+    try {
+      const parsed = new URL(configured.trim())
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return parsed.origin
+      }
+    } catch {}
+  }
+
+  // Non-production fallback
+  if (process.env.NODE_ENV !== 'production' || Boolean(process.env.VITEST)) {
+    const port = Number(process.env.PORT || 3000)
+    return `http://localhost:${port}`
+  }
+
+  throw new Error('Production OAuth security configuration error: APP_URL or FRONTEND_URL environment variable must specify a valid HTTP/HTTPS origin.')
+}
+
 // OAuth Callback handler with cryptographically secure CSRF state verification
 app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
+  let appOrigin = 'http://localhost:3000'
+  try {
+    appOrigin = getAppOrigin(req)
+  } catch (err) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(500).send(`Production OAuth error: ${escapeHtml(err.message)}`)
+    }
+  }
+
   const { code, state, error, error_description } = req.query
 
   if (error || !code) {
@@ -48,7 +94,7 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
           <p>${escapeHtml(String(errorMsg))}</p>
           <script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', error: ${JSON.stringify(errorMsg)} }, '*');
+              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', error: ${JSON.stringify(errorMsg)} }, ${JSON.stringify(appOrigin)});
               setTimeout(() => window.close(), 2500);
             }
           </script>
@@ -69,7 +115,7 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
           <p>Invalid or expired OAuth state parameter (CSRF protection failed). Please try signing in again.</p>
           <script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', error: 'Invalid or expired OAuth state. Please initiate login again.' }, '*');
+              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', error: 'Invalid or expired OAuth state. Please initiate login again.' }, ${JSON.stringify(appOrigin)});
               setTimeout(() => window.close(), 3000);
             }
           </script>
@@ -116,23 +162,29 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
       },
     })
 
-    let user = { login: 'developer' }
-    if (userRes.ok) {
-      user = await userRes.json()
+    if (!userRes.ok) {
+      throw new Error('Failed to retrieve GitHub user profile.')
     }
 
+    const user = await userRes.json()
+    if (!user || !user.id || !user.login) {
+      throw new Error('GitHub user profile response missing numeric user ID.')
+    }
+
+    const canonicalUserId = `gh_${user.id}`
     const userData = {
+      id: user.id,
       login: user.login,
       name: user.name || user.login,
       avatar_url: user.avatar_url,
       html_url: user.html_url,
     }
 
-    // Store token securely on the server; associate with cryptographic session ID
+    // Store token securely on the server; associate with cryptographic session ID and canonical numeric userId
     const session = sessionStore.createSession({
       token: accessToken,
       user: userData,
-      userId: user.login,
+      userId: canonicalUserId,
     })
 
     // Return popup postMessage script without exposing raw access token to client
@@ -150,7 +202,7 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
               user: ${JSON.stringify(userData)}
             };
             if (window.opener) {
-              window.opener.postMessage(payload, '*');
+              window.opener.postMessage(payload, ${JSON.stringify(appOrigin)});
               window.close();
             } else {
               window.location.href = '/';
@@ -169,7 +221,7 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
           <p>${escapeHtml(err.message)}</p>
           <script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', error: ${JSON.stringify(err.message)} }, '*');
+              window.opener.postMessage({ type: 'OAUTH_AUTH_ERROR', error: ${JSON.stringify(err.message)} }, ${JSON.stringify(appOrigin)});
               setTimeout(() => window.close(), 3000);
             }
           </script>
@@ -227,7 +279,9 @@ app.use((error, request, response, next) => {
 })
 app.use(errorHandler)
 
-app.listen(port, '0.0.0.0', () => console.log(`CodeGenome listening on port ${port}`)).on('error', (error) => {
-  console.error('Failed to start server', error)
-  process.exit(1)
-})
+if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+  app.listen(port, '0.0.0.0', () => console.log(`CodeGenome listening on port ${port}`)).on('error', (error) => {
+    console.error('Failed to start server', error)
+    process.exit(1)
+  })
+}

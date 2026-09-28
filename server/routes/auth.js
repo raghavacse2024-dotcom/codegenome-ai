@@ -17,14 +17,15 @@ export function getStoredUser(sessionId) {
 export function setStoredToken(sessionId, token, user) {
   if (!sessionId) return
   const existing = sessionStore.getSession(sessionId)
+  const canonicalUserId = user?.id ? `gh_${user.id}` : null
   if (existing) {
-    sessionStore.updateSession(sessionId, { token, user })
+    sessionStore.updateSession(sessionId, { token, user, userId: canonicalUserId || undefined })
   } else {
     sessionStore.sessions.set(sessionId, {
       sessionId,
       token,
       user,
-      userId: user?.login || null,
+      userId: canonicalUserId,
       createdAt: Date.now(),
       expiresAt: Date.now() + sessionStore.SESSION_TTL_MS,
     })
@@ -104,16 +105,20 @@ authRouter.post('/auth/github/token', async (req, res) => {
     }
 
     const user = await userRes.json()
+    if (!user || !user.id || !user.login) {
+      return res.status(401).json({ error: 'GitHub API response missing numeric user ID.' })
+    }
+
     const userData = {
-      id: user.id || null,
+      id: user.id,
       login: user.login,
       name: user.name || user.login,
       avatar_url: user.avatar_url,
       html_url: user.html_url,
     }
 
-    // Create session with cryptographically secure identifier and canonical userId
-    const canonicalUserId = user.id ? `gh_${user.id}` : user.login
+    // Create session with cryptographically secure identifier and canonical gh_<numeric_id> userId
+    const canonicalUserId = `gh_${user.id}`
     const session = sessionStore.createSession({
       token: cleanToken,
       user: userData,
@@ -162,14 +167,19 @@ authRouter.get('/auth/user', async (req, res) => {
       }
 
       const user = await userRes.json()
+      if (!user || !user.id) {
+        if (authUser.sessionId) sessionStore.deleteSession(authUser.sessionId)
+        return res.json({ authenticated: false, user: null })
+      }
+
       const userData = {
-        id: user.id || null,
+        id: user.id,
         login: user.login,
         name: user.name || user.login,
         avatar_url: user.avatar_url,
         html_url: user.html_url,
       }
-      const canonicalUserId = user.id ? `gh_${user.id}` : user.login
+      const canonicalUserId = `gh_${user.id}`
       if (authUser.sessionId) {
         sessionStore.updateSession(authUser.sessionId, { user: userData, userId: canonicalUserId })
       }
@@ -208,14 +218,18 @@ authRouter.post('/auth/session', async (req, res) => {
       }
 
       const verifiedUser = await uRes.json()
+      if (!verifiedUser || !verifiedUser.id) {
+        return res.status(401).json({ error: 'GitHub API response missing numeric user ID.' })
+      }
+
       const verifiedUserData = {
-        id: verifiedUser.id || null,
+        id: verifiedUser.id,
         login: verifiedUser.login,
         name: verifiedUser.name || verifiedUser.login,
         avatar_url: verifiedUser.avatar_url,
         html_url: verifiedUser.html_url,
       }
-      const canonicalUserId = verifiedUser.id ? `gh_${verifiedUser.id}` : verifiedUser.login
+      const canonicalUserId = `gh_${verifiedUser.id}`
 
       if (sessionId && typeof sessionId === 'string' && sessionStore.getSession(sessionId)) {
         sessionStore.updateSession(sessionId, {
