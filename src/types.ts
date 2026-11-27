@@ -126,13 +126,20 @@ export type RefactorGitDiff = {
   files: FileDiff[]
 }
 
-export type ValidationCheckStatus = 'passed' | 'failed' | 'skipped' | 'not_executed' | 'unknown'
+export type ValidationCheckStatus =
+  | 'passed'
+  | 'failed'
+  | 'skipped'
+  | 'not_executed'
+  | 'unknown'
+  | 'sandbox_unavailable'
 
 export type ValidationBreakdown = {
   staticAnalysis: ValidationCheckStatus
   syntaxValidation: ValidationCheckStatus
   dependencyValidation: ValidationCheckStatus
   testFrameworkCompatibility: ValidationCheckStatus
+  sandboxAvailability?: ValidationCheckStatus
   testsExecuted: ValidationCheckStatus
   buildExecuted: ValidationCheckStatus
   lintExecution: ValidationCheckStatus
@@ -144,22 +151,29 @@ export type ValidationBreakdown = {
 }
 
 export type RefactorValidation = {
-  tests: 'passed' | 'failed' | 'skipped' | 'not_executed'
-  lint: 'passed' | 'failed' | 'skipped' | 'not_executed'
-  typecheck: 'passed' | 'failed' | 'skipped' | 'not_executed'
-  build: 'passed' | 'failed' | 'skipped' | 'not_executed'
+  tests: 'passed' | 'failed' | 'skipped' | 'not_executed' | 'sandbox_unavailable'
+  lint: 'passed' | 'failed' | 'skipped' | 'not_executed' | 'sandbox_unavailable'
+  typecheck: 'passed' | 'failed' | 'skipped' | 'not_executed' | 'sandbox_unavailable'
+  build: 'passed' | 'failed' | 'skipped' | 'not_executed' | 'sandbox_unavailable'
   policy?: 'passed' | 'failed' | 'skipped' | 'not_executed' | 'blocked' | 'unknown'
+  sandboxAvailability?: 'passed' | 'sandbox_unavailable'
   syntaxValidation?: 'passed' | 'failed'
   dependencyValidation?: 'passed' | 'failed'
   staticValidation?: 'passed' | 'failed'
-  executionValidation?: 'passed' | 'failed' | 'not_executed'
+  executionValidation?: 'passed' | 'failed' | 'not_executed' | 'sandbox_unavailable'
   testFrameworkValidation?: 'passed' | 'failed'
   securityValidation?: 'passed' | 'failed'
   policyValidation?: 'passed' | 'failed' | 'blocked' | 'unknown'
   safeToPropose: boolean
 }
 
-export type PrState = 'PR_ELIGIBLE' | 'PR_BLOCKED' | 'HUMAN_REVIEW_REQUIRED' | 'VALIDATION_FAILED' | 'POLICY_UNKNOWN'
+export type PrState =
+  | 'PR_ELIGIBLE'
+  | 'PR_BLOCKED'
+  | 'HUMAN_REVIEW_REQUIRED'
+  | 'VALIDATION_FAILED'
+  | 'POLICY_UNKNOWN'
+  | 'SANDBOX_UNAVAILABLE'
 
 export type ContributionPolicyState = 'ALLOWED' | 'BLOCKED' | 'UNKNOWN'
 
@@ -201,6 +215,10 @@ export type PullRequestResult = {
   isHighRisk?: boolean
   validation?: RefactorValidation
   validationBreakdown?: ValidationBreakdown
+  sandboxAvailable?: boolean
+  sandboxStatus?: 'AVAILABLE' | 'SANDBOX_UNAVAILABLE'
+  unavailableReason?: string | null
+  executionEnvironment?: string
   failedStep?: string | null
   allowsManualExport?: boolean
 }
@@ -290,6 +308,9 @@ export type Analysis = {
         testFramework?: string
         pullRequestTitle: string
         state?: PrState
+        sandboxAvailable?: boolean
+        sandboxStatus?: 'AVAILABLE' | 'SANDBOX_UNAVAILABLE'
+        unavailableReason?: string | null
         policy?: ContributionPolicyResult
         validation?: RefactorValidation
         validationBreakdown?: ValidationBreakdown
@@ -306,6 +327,9 @@ export type Analysis = {
         checks: string[]
         caveat?: string | null
         state?: PrState
+        sandboxAvailable?: boolean
+        sandboxStatus?: 'AVAILABLE' | 'SANDBOX_UNAVAILABLE'
+        unavailableReason?: string | null
         policy?: ContributionPolicyResult
         validation?: RefactorValidation
         validationBreakdown?: ValidationBreakdown

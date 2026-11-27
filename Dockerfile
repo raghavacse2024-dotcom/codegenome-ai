@@ -1,9 +1,6 @@
 FROM node:22-bookworm-slim
 
-# Install Python 3 runtime for isolated sandbox syntax/unittest validation
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-minimal \
     ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -15,7 +12,7 @@ RUN npm ci --omit=dev
 COPY server ./server
 COPY firebase-applet-config.json ./firebase-applet-config.json
 
-# Create unprivileged runtime user
+# Create unprivileged runtime user with restricted filesystem permissions
 RUN addgroup --system codegenome && adduser --system --ingroup codegenome codegenome \
   && chown -R codegenome:codegenome /app
 
@@ -23,6 +20,8 @@ USER codegenome
 
 ENV NODE_ENV=production
 ENV PORT=3000
+# Production requires Docker isolation or an external HTTPS SANDBOX_WORKER_URL;
+# otherwise validation fails closed with SANDBOX_UNAVAILABLE rather than running host subprocesses.
 ENV SANDBOX_MODE=auto
 
 EXPOSE 3000

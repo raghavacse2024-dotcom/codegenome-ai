@@ -55,10 +55,14 @@ prRouter.post('/pr/validate', prRateLimiter, async (req, res, next) => {
       policyFiles: analysis.policyFiles || [],
       patch: refactorData.diff?.rawPatch || '',
       confirmedHighRisk: Boolean(req.body.confirmedHighRisk),
+      userId: authUser.userId || 'anonymous',
     })
 
     res.json({
       state: validation.state,
+      sandboxAvailable: validation.sandboxAvailable,
+      sandboxStatus: validation.sandboxStatus,
+      unavailableReason: validation.unavailableReason,
       policy: validation.policy,
       language: validation.language,
       validation: validation.validation,
@@ -158,6 +162,7 @@ prRouter.post('/pr/create', prRateLimiter, async (req, res, next) => {
       targetPath,
       refactoredTarget,
       confirmedHighRisk: Boolean(confirmedHighRisk),
+      userId: authUser.userId || 'anonymous',
     })
 
     if (result.state === 'PR_BLOCKED') {

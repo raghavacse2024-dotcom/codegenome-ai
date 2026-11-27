@@ -471,7 +471,7 @@ export async function runAnalysis(repository, onProgress = null) {
   const refactoredTarget = generated.refactoredTargetContent
   const diff = generated.diff
 
-  // 2. Validate generated refactor through isolated sandbox pipeline
+  // 2. Validate generated refactor through SandboxJobManager -> Isolated Execution Provider
   const validationResult = await validateRefactor({
     files: scaffolds,
     targetPath: target.path,
@@ -479,6 +479,7 @@ export async function runAnalysis(repository, onProgress = null) {
     baseFiles: files,
     policyFiles: repository.policyFiles || [],
     patch: diff?.rawPatch || '',
+    userId: repository.userId || 'anonymous',
   })
 
   const refactorBase = {
@@ -495,6 +496,9 @@ export async function runAnalysis(repository, onProgress = null) {
     testFramework: generated.testFramework,
     pullRequestTitle: `refactor: modularize ${target.path}`,
     state: validationResult.state,
+    sandboxAvailable: validationResult.sandboxAvailable,
+    sandboxStatus: validationResult.sandboxStatus,
+    unavailableReason: validationResult.unavailableReason,
     validation: validationResult.validation,
     validationBreakdown: validationResult.validationBreakdown,
     executionEnvironment: validationResult.executionEnvironment,
@@ -510,8 +514,9 @@ export async function runAnalysis(repository, onProgress = null) {
     `Language & environment: ${generated.language} matching target repository conventions.`,
     `Generated code syntax: ${validationResult.validation.lint === 'passed' ? 'Valid ' + generated.language + ' AST' : 'Syntax error in generated code'}.`,
     `Dependency & module boundaries: ${validationResult.validation.typecheck === 'passed' ? 'Imports resolved and verified' : 'Import resolution issues'}.`,
-    `Test execution: ${validationResult.validation.tests === 'passed' ? 'Executed & passed (' + generated.testFramework + ')' : validationResult.validation.tests === 'failed' ? 'Test execution failed' : validationResult.validation.tests === 'skipped' ? 'Skipped (no test files)' : 'Not executed in sandbox (' + generated.testFramework + ')'}.`,
-    `Build execution: ${validationResult.validation.build === 'passed' ? 'Compiled & passed' : validationResult.validation.build === 'failed' ? 'Build failed' : 'Not executed in sandbox'}.`,
+    `Sandbox isolation: ${validationResult.sandboxAvailable ? `Available (${validationResult.executionEnvironment})` : `SANDBOX_UNAVAILABLE (${validationResult.unavailableReason || 'no approved isolated runner'})`}.`,
+    `Test execution: ${validationResult.validation.tests === 'passed' ? 'Executed & passed (' + generated.testFramework + ')' : validationResult.validation.tests === 'failed' ? 'Test execution failed' : validationResult.validation.tests === 'sandbox_unavailable' ? 'Sandbox unavailable (fail-closed)' : validationResult.validation.tests === 'skipped' ? 'Skipped (no test files)' : 'Not executed in sandbox (' + generated.testFramework + ')'}.`,
+    `Build execution: ${validationResult.validation.build === 'passed' ? 'Compiled & passed' : validationResult.validation.build === 'failed' ? 'Build failed' : validationResult.validation.build === 'sandbox_unavailable' ? 'Sandbox unavailable (fail-closed)' : 'Not executed in sandbox'}.`,
     `Security & secret checks: ${validationResult.guardrails.passed ? 'No secrets or sensitive files' : 'Violations detected'}.`,
     `Repository contribution policy: ${validationResult.policy.status} (${validationResult.policy.policyFile || 'No policy file'}).`,
   ]
@@ -522,11 +527,16 @@ export async function runAnalysis(repository, onProgress = null) {
     ? 'Verified'
     : validationResult.state === 'VALIDATION_FAILED'
     ? 'Validation Failed'
+    : validationResult.state === 'SANDBOX_UNAVAILABLE'
+    ? 'Sandbox Unavailable'
     : 'Human Review Required'
 
   const reviewBase = {
     verdict: reviewVerdict,
     state: validationResult.state,
+    sandboxAvailable: validationResult.sandboxAvailable,
+    sandboxStatus: validationResult.sandboxStatus,
+    unavailableReason: validationResult.unavailableReason,
     checks: reviewChecks,
     policy: validationResult.policy,
     validation: validationResult.validation,
@@ -539,6 +549,8 @@ export async function runAnalysis(repository, onProgress = null) {
     summary: `Review verdict: ${reviewVerdict} (state=${validationResult.state}).`,
     caveat: validationResult.policy.isBlocked
       ? validationResult.policy.explanation
+      : !validationResult.sandboxAvailable
+      ? (validationResult.unavailableReason || 'Isolated sandbox execution is unavailable; human build and test verification required.')
       : repository.metadata?.completeness !== 'complete'
       ? repository.metadata?.samplingNotice || 'Repository indexing was partial; inspect the full repository before merging.'
       : null,

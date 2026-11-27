@@ -474,10 +474,66 @@ codegenome-ai/
 - **Resource Protection**: Protected endpoints (`/api/analysis/:id`, `/api/download`, `/api/qa`, `/api/pr/patch`, `/api/pr/create`) enforce strict ownership checks before yielding data or performing actions.
 - **Firestore Server Architecture**: Server-side persistence operates via Firebase Admin SDK with strict application-level authorization.
 
-### Refactor Safety & Validation Semantics
-- **Static Validation**: Refactoring validation performs static syntax, AST, import, and test framework compatibility checks.
-- **Honest Execution Semantics**: Static checks are explicitly distinguished from runtime execution (`tests: "not_executed"`, `build: "not_executed"`). Arbitrary repository code is never executed on the host server without process sandbox isolation.
-- **Developer Review**: Generated refactor scaffolds and patches are recommendations and must be reviewed and tested by human engineers before merging.
+### Refactor Safety, Sandbox Architecture & Validation Semantics
+CodeGenomeAI routes untrusted repository code and AI-generated refactorings through a strict, fail-closed execution boundary:
+
+```text
+Main Backend (/api/analyze, /api/pr/validate, /api/pr/create)
+        |
+        v
+SandboxJobManager (server/services/sandboxJobManager.js)
+  - Global & per-user concurrency / queue limits
+  - File-count, disk-byte, output, and execution timeout caps
+  - Guaranteed workspace cleanup on completion, failure, or cancellation
+        |
+        v
+Isolated Execution Provider (server/services/sandboxExecutor.js)
+  - Production: Hardened Docker container OR HTTPS Remote Sandbox Worker (SANDBOX_WORKER_URL)
+  - Dev / Test: Explicitly trusted dev/test subprocess runner (NEVER permitted in NODE_ENV=production)
+  - Fail-closed: Returns SANDBOX_UNAVAILABLE if no approved isolated provider exists
+        |
+        v
+Temporary Sandbox Workspace (0700 perms, symlink & path-traversal blocked)
+        |
+        v
+Fixed Allowlisted Commands Only (python3 -m py_compile, python3 -m unittest, node --check, node --test, local tsc --noEmit)
+        |
+        v
+Honest Validation Report (PASSED | FAILED | NOT_EXECUTED | SKIPPED | UNKNOWN | SANDBOX_UNAVAILABLE)
+```
+
+#### Sandbox Security Boundaries
+- **Docker Container Hardening**: Enforces `--user 65534:65534` (non-root), `--network=none`, `--read-only`, `--tmpfs /tmp:rw,noexec,nosuid,size=64m`, `--cap-drop=ALL`, `--security-opt=no-new-privileges:true`, `--cpus`, `--memory`, `--memory-swap`, `--pids-limit`, `--ulimit nofile=64:64`, image allowlisting, and bind-mounting only the temporary workspace (never `--privileged`, never host paths, and never `/var/run/docker.sock`).
+- **No Production Subprocess Downgrade**: Host subprocess execution is strictly rejected when `NODE_ENV=production`. If neither Docker nor an HTTPS `SANDBOX_WORKER_URL` is configured in production, `SANDBOX_MODE=auto` and `SANDBOX_MODE=docker` both fail closed with `SANDBOX_UNAVAILABLE`.
+- **No Shell Interpolation or Arbitrary Installs**: Only fixed, allowlisted validation commands are invoked with `shell: false`. Repository `npm install`, `pip install`, or package lifecycle hooks are never executed automatically on the backend host.
+- **Symlink & Traversal Defenses**: `writeSandboxFiles` verifies every directory segment via `lstatSync` and `realpathSync` inside owner-only temporary directories and enforces `SANDBOX_MAX_FILES` and `SANDBOX_MAX_WORKSPACE_BYTES`.
+- **Secret Isolation**: Application credentials (`GEMINI_API_KEY`, `GITHUB_CLIENT_SECRET`, `OPENAI_API_KEY`, `SESSION_ENCRYPTION_KEY`, Firebase keys) are stripped from sandbox environments and blocked from `extraEnv`.
+
+#### Supported Execution Environments & Production Requirements
+| Environment | `SANDBOX_MODE` | Behavior |
+|---|---|---|
+| Production with Docker | `auto` / `docker` | Executes inside hardened Docker container (`--network=none`, non-root) |
+| Production on Render / PaaS | `auto` / `remote` | Routes to external HTTPS worker (`SANDBOX_WORKER_URL`), or fails closed with `SANDBOX_UNAVAILABLE` |
+| Local Development / Vitest | `auto` / `subprocess` | Runs trusted dev/test subprocess when Docker is unavailable |
+| Disabled | `disabled` | Static checks only; runtime checks report `SANDBOX_UNAVAILABLE` |
+
+#### Resource Restrictions (Configurable via `.env`)
+- `SANDBOX_MAX_WORKSPACE_BYTES` (`10485760` / 10 MB)
+- `SANDBOX_MAX_FILES` (`50` files)
+- `SANDBOX_MAX_EXECUTION_MS` (`8000` ms)
+- `SANDBOX_MAX_MEMORY_MB` (`256` MB)
+- `SANDBOX_MAX_CPUS` (`0.5` vCPU)
+- `SANDBOX_MAX_PIDS` (`64` processes)
+- `SANDBOX_MAX_OUTPUT_BYTES` (`32768` bytes per stream)
+- `SANDBOX_MAX_CONCURRENT_JOBS` (`4` global active jobs)
+- `SANDBOX_MAX_USER_JOBS` (`2` active/queued jobs per authenticated user)
+
+#### Current Limitations vs. Future Improvements
+- **Implemented**: Fail-closed production provider boundary, hardened Docker argument builder/validator, HTTPS remote worker transport, `SandboxJobManager` concurrency/resource limits, symlink/traversal prevention, and honest dashboard separation of static checks vs. runtime execution vs. sandbox availability.
+- **Current Limitation**: Standard Render/PaaS web containers do not expose a Docker daemon; without setting `SANDBOX_WORKER_URL` to a dedicated isolated sandbox worker service, production deployments will safely report `SANDBOX_UNAVAILABLE` for runtime builds/tests while continuing to run read-only static AST/syntax/policy validation. Furthermore, third-party repository dependencies (`node_modules`, external PyPI packages) are not pre-installed into the sandbox, so tests importing external dependencies report `NOT_EXECUTED` rather than `PASSED`.
+- **Future Improvements**: Deploy a dedicated Firecracker/gVisor or Kubernetes Job sandbox worker behind `SANDBOX_WORKER_URL` with pre-warmed read-only dependency caches for full third-party build and test execution across Go, Rust, Java, Python, and TypeScript repositories.
+
+- **Developer Review**: Generated refactor scaffolds and patches are recommendations and must be reviewed and tested by human engineers before merging (auto-merge is disabled).
 
 ---
 

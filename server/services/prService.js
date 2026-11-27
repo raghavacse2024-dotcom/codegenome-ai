@@ -66,6 +66,7 @@ export async function createPullRequest({
   targetPath = null,
   refactoredTarget = null,
   confirmedHighRisk = false,
+  userId = 'anonymous',
 }) {
   // 0. Validate repository owner, repository name, and branch names strictly
   const cleanOwner = validateRepoSegment(owner, 'owner')
@@ -120,6 +121,7 @@ export async function createPullRequest({
     policyFiles,
     patch,
     confirmedHighRisk,
+    userId,
   })
 
   const cleanToken = getCleanToken(token)
@@ -129,6 +131,7 @@ export async function createPullRequest({
   if (!validationResult.validation.safeToPropose) {
     let mode = 'validation_failed'
     if (validationResult.policy?.status === 'BLOCKED') mode = 'blocked'
+    else if (validationResult.state === 'SANDBOX_UNAVAILABLE') mode = 'review_required'
     else if (validationResult.policy?.status === 'UNKNOWN') mode = 'review_required'
     else if (validationResult.state === 'HUMAN_REVIEW_REQUIRED') mode = 'review_required'
 
@@ -140,8 +143,13 @@ export async function createPullRequest({
       prUrl: null,
       compareUrl: null,
       state: validationResult.state,
+      sandboxAvailable: validationResult.sandboxAvailable,
+      sandboxStatus: validationResult.sandboxStatus,
+      unavailableReason: validationResult.unavailableReason,
       error: validationResult.policy?.status === 'BLOCKED'
         ? validationResult.policy.explanation
+        : validationResult.state === 'SANDBOX_UNAVAILABLE'
+        ? (validationResult.unavailableReason || 'Isolated sandbox execution is unavailable. Automated PR creation is blocked; review manually or apply patch locally.')
         : (validationResult.policy?.status === 'UNKNOWN'
             ? validationResult.policy.explanation
             : `Refactor validation failed or requires human review at step '${validationResult.failedStep || 'execution_validation'}'. PR proposal blocked.`),

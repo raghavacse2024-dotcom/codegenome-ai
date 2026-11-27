@@ -10,8 +10,31 @@ services:
         value: production
       - key: PORT
         value: 10000
+      # Never set SANDBOX_MODE=subprocess in production; production fails closed unless Docker or HTTPS SANDBOX_WORKER_URL is active.
       - key: SANDBOX_MODE
-        value: subprocess
+        value: auto
+      - key: SANDBOX_WORKER_URL
+        sync: false
+      - key: SANDBOX_WORKER_TOKEN
+        sync: false
+      - key: SANDBOX_MAX_WORKSPACE_BYTES
+        value: 10485760
+      - key: SANDBOX_MAX_FILES
+        value: 50
+      - key: SANDBOX_MAX_EXECUTION_MS
+        value: 8000
+      - key: SANDBOX_MAX_MEMORY_MB
+        value: 256
+      - key: SANDBOX_MAX_CPUS
+        value: 0.5
+      - key: SANDBOX_MAX_PIDS
+        value: 64
+      - key: SANDBOX_MAX_OUTPUT_BYTES
+        value: 32768
+      - key: SANDBOX_MAX_CONCURRENT_JOBS
+        value: 4
+      - key: SANDBOX_MAX_USER_JOBS
+        value: 2
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL

@@ -1,11 +1,23 @@
 import { useState } from 'react'
-import { CheckCircle2, XCircle, MinusCircle, HelpCircle, SkipForward, Terminal, ChevronDown, ChevronUp, Shield } from 'lucide-react'
+import {
+  CheckCircle2,
+  XCircle,
+  MinusCircle,
+  HelpCircle,
+  SkipForward,
+  Terminal,
+  ChevronDown,
+  ChevronUp,
+  Shield,
+  AlertTriangle,
+} from 'lucide-react'
 import type { Analysis, ValidationCheckStatus } from '../types'
 
 function normalizeStatus(raw: string | undefined): ValidationCheckStatus {
   const s = (raw || '').toLowerCase()
   if (s === 'passed' || s === 'pr_created' || s === 'ready' || s === 'satisfied') return 'passed'
   if (s === 'failed' || s === 'blocked' || s === 'pr_blocked' || s === 'github_operation_failed') return 'failed'
+  if (s === 'sandbox_unavailable') return 'sandbox_unavailable'
   if (s === 'skipped') return 'skipped'
   if (s === 'unknown' || s === 'policy_unknown' || s === 'review_required' || s === 'required' || s === 'branch_created_pr_not_created') return 'unknown'
   return 'not_executed'
@@ -29,6 +41,13 @@ function StatusBadge({ status, customLabel }: { status: ValidationCheckStatus; c
       bg: 'rgba(239, 68, 68, 0.14)',
       border: 'rgba(239, 68, 68, 0.35)',
       icon: XCircle,
+    },
+    sandbox_unavailable: {
+      label: customLabel || 'SANDBOX_UNAVAILABLE',
+      color: '#fb7185',
+      bg: 'rgba(244, 63, 94, 0.15)',
+      border: 'rgba(244, 63, 94, 0.4)',
+      icon: AlertTriangle,
     },
     not_executed: {
       label: customLabel || 'NOT_EXECUTED',
@@ -80,6 +99,16 @@ function StatusBadge({ status, customLabel }: { status: ValidationCheckStatus; c
   )
 }
 
+function formatExecutionEnvironment(execEnv: string): string {
+  if (execEnv === 'docker') return 'Docker Container (--network=none, non-root)'
+  if (execEnv === 'remote-worker') return 'Remote HTTPS Sandbox Worker'
+  if (execEnv === 'trusted-dev-subprocess' || execEnv === 'isolated-subprocess') {
+    return 'Trusted Dev/Test Subprocess'
+  }
+  if (execEnv === 'sandbox_unavailable') return 'Sandbox Unavailable (Fail-Closed)'
+  return execEnv
+}
+
 export function ValidationDashboard({ analysis }: { analysis: Analysis }) {
   const [showLogs, setShowLogs] = useState(false)
   const refactor = analysis.results.refactor.data
@@ -89,7 +118,13 @@ export function ValidationDashboard({ analysis }: { analysis: Analysis }) {
   const policy = refactor.policy || review.policy
   const logs = refactor.logs || review.logs || {}
   const exitCodes = refactor.exitCodes || review.exitCodes || {}
-  const execEnv = refactor.executionEnvironment || review.executionEnvironment || 'isolated-subprocess'
+  const execEnv = refactor.executionEnvironment || review.executionEnvironment || 'sandbox_unavailable'
+  const unavailableReason = refactor.unavailableReason || review.unavailableReason || null
+  const sandboxUnavailable =
+    execEnv === 'sandbox_unavailable' ||
+    refactor.sandboxAvailable === false ||
+    breakdown?.sandboxAvailability === 'sandbox_unavailable' ||
+    validation?.sandboxAvailability === 'sandbox_unavailable'
 
   const policyStatusLabel = policy?.status || 'UNKNOWN'
   const prState = refactor.state || review.state || 'HUMAN_REVIEW_REQUIRED'
@@ -105,64 +140,70 @@ export function ValidationDashboard({ analysis }: { analysis: Analysis }) {
       key: 'staticAnalysis',
       label: 'Static Analysis',
       status: normalizeStatus(breakdown?.staticAnalysis || validation?.staticValidation || 'passed'),
-      detail: 'AST complexity & module structure analysis',
+      detail: 'AST complexity & module structure scan (no untrusted execution)',
     },
     {
       key: 'syntaxValidation',
       label: 'Syntax Validation',
       status: normalizeStatus(breakdown?.syntaxValidation || validation?.syntaxValidation || validation?.lint),
-      detail: `Parser check for ${refactor.language || 'target'} syntax`,
+      detail: `Parser & syntax verification for ${refactor.language || 'target'} files`,
+    },
+    {
+      key: 'typecheckExecution',
+      label: 'Type Checking',
+      status: normalizeStatus(breakdown?.typecheckExecution || (sandboxUnavailable ? 'sandbox_unavailable' : 'not_executed')),
+      detail: sandboxUnavailable
+        ? 'Could not execute: no approved isolated sandbox provider is available.'
+        : exitCodes.typecheck !== undefined && exitCodes.typecheck !== null
+        ? `tsc --noEmit exit code: ${exitCodes.typecheck}`
+        : 'Requires project dependencies & TypeScript compiler inside sandbox',
+    },
+    {
+      key: 'buildExecuted',
+      label: 'Build Execution',
+      status: normalizeStatus(breakdown?.buildExecuted || validation?.build),
+      detail: sandboxUnavailable
+        ? 'Could not execute: isolated sandbox unavailable in fail-closed mode.'
+        : exitCodes.build !== undefined && exitCodes.build !== null
+        ? `Compiler / build exit code: ${exitCodes.build}`
+        : 'Not executed: external build script or dependencies not mounted in sandbox',
+    },
+    {
+      key: 'testsExecuted',
+      label: 'Test Execution',
+      status: normalizeStatus(breakdown?.testsExecuted || validation?.tests),
+      detail: sandboxUnavailable
+        ? 'Could not execute: isolated sandbox unavailable in fail-closed mode.'
+        : exitCodes.tests !== undefined && exitCodes.tests !== null
+        ? `Test runner exit code: ${exitCodes.tests}`
+        : `Not executed: ${refactor.testFramework || 'test runner'} requires full repository dependencies`,
+    },
+    {
+      key: 'sandboxAvailability',
+      label: 'Sandbox Availability',
+      status: sandboxUnavailable ? 'sandbox_unavailable' : 'passed',
+      customLabel: sandboxUnavailable ? 'SANDBOX_UNAVAILABLE' : 'AVAILABLE',
+      detail: sandboxUnavailable
+        ? unavailableReason || 'Isolated Docker or remote sandbox worker unavailable; execution failed closed.'
+        : `Active provider: ${formatExecutionEnvironment(execEnv)}`,
+    },
+    {
+      key: 'securityGuardrails',
+      label: 'Security Validation',
+      status: normalizeStatus(breakdown?.securityGuardrails || validation?.securityValidation),
+      detail: 'Secret redaction, path traversal, and dangerous-change guardrails',
     },
     {
       key: 'dependencyValidation',
-      label: 'Dependency Validation',
+      label: 'Import & Dependency Check',
       status: normalizeStatus(breakdown?.dependencyValidation || validation?.dependencyValidation || validation?.typecheck),
-      detail: 'Import boundaries and relative module links',
+      detail: 'Static relative import links & module boundary checks',
     },
     {
       key: 'testFrameworkCompatibility',
       label: 'Test Framework Compatibility',
       status: normalizeStatus(breakdown?.testFrameworkCompatibility || validation?.testFrameworkValidation),
-      detail: `Alignment with ${refactor.testFramework || 'repository'} conventions`,
-    },
-    {
-      key: 'testsExecuted',
-      label: 'Tests Executed',
-      status: normalizeStatus(breakdown?.testsExecuted || validation?.tests),
-      detail:
-        exitCodes.tests !== undefined && exitCodes.tests !== null
-          ? `Sandbox exit code: ${exitCodes.tests}`
-          : 'Requires runnable tests & deps in sandbox',
-    },
-    {
-      key: 'buildExecuted',
-      label: 'Build Executed',
-      status: normalizeStatus(breakdown?.buildExecuted || validation?.build),
-      detail:
-        exitCodes.build !== undefined && exitCodes.build !== null
-          ? `Compiler exit code: ${exitCodes.build}`
-          : 'Compiler / build execution status',
-    },
-    {
-      key: 'lintExecution',
-      label: 'Lint Execution',
-      status: normalizeStatus(breakdown?.lintExecution || validation?.lint),
-      detail: 'Language syntax & lint checks',
-    },
-    {
-      key: 'typecheckExecution',
-      label: 'Type-Check Execution',
-      status: normalizeStatus(breakdown?.typecheckExecution || 'not_executed'),
-      detail:
-        exitCodes.typecheck !== undefined && exitCodes.typecheck !== null
-          ? `tsc exit code: ${exitCodes.typecheck}`
-          : 'Isolated compiler type-check',
-    },
-    {
-      key: 'securityGuardrails',
-      label: 'Security Guardrails',
-      status: normalizeStatus(breakdown?.securityGuardrails || validation?.securityValidation),
-      detail: 'Secret redaction & path safety verification',
+      detail: `Static syntax alignment with ${refactor.testFramework || 'repository'} (not test execution)`,
     },
     {
       key: 'contributionPolicy',
@@ -174,9 +215,11 @@ export function ValidationDashboard({ analysis }: { analysis: Analysis }) {
     {
       key: 'humanReviewRequirement',
       label: 'Human Review Requirement',
-      status: validation?.safeToPropose ? 'passed' : 'unknown',
-      customLabel: validation?.safeToPropose ? 'OPTIONAL_READY' : 'REQUIRED',
-      detail: validation?.safeToPropose ? 'All checks passed; PR still requires user trigger' : `Blocked from auto-PR (${prState})`,
+      status: validation?.safeToPropose ? 'unknown' : 'unknown',
+      customLabel: validation?.safeToPropose ? 'RECOMMENDED' : 'REQUIRED',
+      detail: validation?.safeToPropose
+        ? 'All checks executed & passed; PR creation still requires explicit user trigger'
+        : `Human verification required (${prState})`,
     },
     {
       key: 'githubPullRequestStatus',
@@ -188,7 +231,7 @@ export function ValidationDashboard({ analysis }: { analysis: Analysis }) {
           : breakdown?.githubPullRequestStatus === 'failed'
           ? 'FAILED'
           : 'NOT_ATTEMPTED',
-      detail: 'Auto-merge is disabled; PRs require explicit user confirmation',
+      detail: 'Auto-merge is disabled; PRs require explicit human review',
     },
   ]
 
@@ -205,7 +248,7 @@ export function ValidationDashboard({ analysis }: { analysis: Analysis }) {
           <h2>Validation Dashboard</h2>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span className="panel-tag">Sandbox: {execEnv}</span>
+          <span className="panel-tag">Environment: {formatExecutionEnvironment(execEnv)}</span>
           {hasLogs && (
             <button
               type="button"
@@ -220,6 +263,30 @@ export function ValidationDashboard({ analysis }: { analysis: Analysis }) {
           )}
         </div>
       </div>
+
+      {sandboxUnavailable && (
+        <div
+          style={{
+            marginTop: '10px',
+            padding: '10px 12px',
+            borderRadius: '8px',
+            background: 'rgba(244, 63, 94, 0.1)',
+            border: '1px solid rgba(244, 63, 94, 0.32)',
+            fontSize: '12px',
+            color: '#fecdd3',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '8px',
+          }}
+        >
+          <AlertTriangle size={15} style={{ color: '#fb7185', flexShrink: 0, marginTop: '2px' }} />
+          <div>
+            <strong>Sandbox Execution Unavailable (Fail-Closed):</strong>{' '}
+            {unavailableReason ||
+              'No approved isolated sandbox environment (Docker or HTTPS remote worker) is available, so runtime build, type-check, and test execution were blocked rather than downgraded to an insecure host subprocess.'}
+          </div>
+        </div>
+      )}
 
       <div
         style={{

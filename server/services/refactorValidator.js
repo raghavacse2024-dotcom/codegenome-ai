@@ -11,15 +11,16 @@ import {
   cleanupSandboxWorkspace,
   runLanguageSandboxChecks,
 } from './sandboxExecutor.js'
+import { sandboxJobManager } from './sandboxJobManager.js'
 
 const isTestEnv = () => Boolean(process.env.VITEST || process.env.NODE_ENV === 'test')
 
 /**
  * Sandboxed Refactor Validation Pipeline.
  *
- * Implements the full validation sequence with real isolated sandbox execution
- * where runtime toolchains are available, and strictly honest status reporting
- * (PASSED, FAILED, NOT_EXECUTED, SKIPPED, UNKNOWN).
+ * Routes untrusted code validation through SandboxJobManager -> Isolated Execution Provider.
+ * Enforces resource limits, concurrency caps, symlink/traversal defenses, and strictly honest status reporting
+ * (PASSED, FAILED, NOT_EXECUTED, SKIPPED, UNKNOWN, SANDBOX_UNAVAILABLE).
  * Never reports tests or builds as 'passed' without actually executing them.
  */
 export async function validateRefactor({
@@ -31,49 +32,54 @@ export async function validateRefactor({
   patch = '',
   confirmedHighRisk = false,
   simulateExecution = false,
+  userId = 'anonymous',
+  providerOverride = null,
 }) {
-  const tmpDir = createSandboxWorkspace('codegenome-sandbox-')
-  const logs = {
-    lint: '',
-    typecheck: '',
-    build: '',
-    tests: '',
-    policy: '',
-  }
+  return sandboxJobManager.runJob({ userId }, async ({ jobId, limits, signal }) => {
+    const tmpDir = createSandboxWorkspace(`codegenome-${jobId}-`)
+    const logs = {
+      lint: '',
+      typecheck: '',
+      build: '',
+      tests: '',
+      policy: '',
+    }
 
-  let lintPassed = true
-  let typecheckPassed = true
-  let buildPassed = true
-  let testsCompatPassed = true
-  let failedStep = null
-  let sandboxResults = {
-    executionEnvironment: 'isolated-subprocess',
-    lint: { status: 'not_executed', exitCode: null, output: '' },
-    typecheck: { status: 'not_executed', exitCode: null, output: '' },
-    build: { status: 'not_executed', exitCode: null, output: '' },
-    tests: { status: 'not_executed', exitCode: null, output: '' },
-  }
+    let lintPassed = true
+    let typecheckPassed = true
+    let buildPassed = true
+    let testsCompatPassed = true
+    let failedStep = null
+    let sandboxResults = {
+      sandboxAvailable: true,
+      unavailableReason: null,
+      executionEnvironment: 'sandbox_unavailable',
+      lint: { status: 'not_executed', exitCode: null, output: '' },
+      typecheck: { status: 'not_executed', exitCode: null, output: '' },
+      build: { status: 'not_executed', exitCode: null, output: '' },
+      tests: { status: 'not_executed', exitCode: null, output: '' },
+    }
 
-  // 1. Language & Environment Detection
-  const targetHotspot = targetPath || files[0]?.path || 'src/feature.ts'
-  const langEnv = analyzeLanguageEnvironment(targetHotspot, baseFiles)
-  const targetLanguage = langEnv.language
-  const expectedTestFramework = langEnv.testFramework
+    // 1. Language & Environment Detection
+    const targetHotspot = targetPath || files[0]?.path || 'src/feature.ts'
+    const langEnv = analyzeLanguageEnvironment(targetHotspot, baseFiles)
+    const targetLanguage = langEnv.language
+    const expectedTestFramework = langEnv.testFramework
 
-  // 2. Normalize files for isolated sandbox workspace
-  const allFiles = files.map((f) => ({
-    path: f.path,
-    content: f.content !== undefined ? f.content : (f.newContent !== undefined ? f.newContent : ''),
-  }))
+    // 2. Normalize files for isolated sandbox workspace
+    const allFiles = files.map((f) => ({
+      path: f.path,
+      content: f.content !== undefined ? f.content : (f.newContent !== undefined ? f.newContent : ''),
+    }))
 
-  if (targetPath && refactoredTarget && !allFiles.some((f) => f.path === targetPath)) {
-    allFiles.push({ path: targetPath, content: refactoredTarget })
-  }
+    if (targetPath && refactoredTarget && !allFiles.some((f) => f.path === targetPath)) {
+      allFiles.push({ path: targetPath, content: refactoredTarget })
+    }
 
-  const testFiles = allFiles.filter((f) => isTestFile(f.path))
+    const testFiles = allFiles.filter((f) => isTestFile(f.path))
 
-  try {
-    writeSandboxFiles(tmpDir, allFiles)
+    try {
+      writeSandboxFiles(tmpDir, allFiles, limits)
 
     // 3. Stage 1: Static Syntax & Language Consistency Validation
     logs.lint += `[Sandbox] Validating syntax for target language '${targetLanguage}' across ${allFiles.length} file(s)...\n`
@@ -247,13 +253,15 @@ export async function validateRefactor({
       logs.tests += '  ℹ No automated test files in refactor package.\n'
     }
 
-    // 7. Stage 5: Real Isolated Sandbox Execution (when static checks passed)
+    // 7. Stage 5: Real Isolated Sandbox Execution via approved provider (when static checks passed)
     sandboxResults = await runLanguageSandboxChecks({
       workspaceDir: tmpDir,
       allFiles,
       targetLanguage,
       expectedTestFramework,
       staticPassed: lintPassed && typecheckPassed && buildPassed && testsCompatPassed,
+      providerOverride,
+      signal,
     })
 
     if (sandboxResults.lint?.output) {
@@ -305,171 +313,203 @@ export async function validateRefactor({
     logs.policy += `[Policy] ✓ Repository permits automated pull requests.\n`
   }
 
-  // Resolve genuine execution statuses: PASSED, FAILED, NOT_EXECUTED, SKIPPED
-  const allowSimulatedInTests = Boolean(simulateExecution && isTestEnv())
+    // Resolve genuine execution statuses: PASSED, FAILED, NOT_EXECUTED, SKIPPED, SANDBOX_UNAVAILABLE
+    const allowSimulatedInTests = Boolean(simulateExecution && isTestEnv())
+    const sandboxUnavailable =
+      sandboxResults.sandboxAvailable === false || sandboxResults.executionEnvironment === 'sandbox_unavailable'
 
-  let buildStatus = 'not_executed'
-  if (!buildPassed || sandboxResults.build?.status === 'failed') {
-    buildStatus = 'failed'
-    failedStep = failedStep || 'build'
-  } else if (sandboxResults.build?.status === 'passed') {
-    buildStatus = 'passed'
-  } else if (sandboxResults.build?.status === 'skipped') {
-    buildStatus = 'skipped'
-  } else if (allowSimulatedInTests) {
-    buildStatus = 'passed'
-  }
+    let buildStatus = 'not_executed'
+    if (!buildPassed || sandboxResults.build?.status === 'failed') {
+      buildStatus = 'failed'
+      failedStep = failedStep || 'build'
+    } else if (sandboxResults.build?.status === 'passed') {
+      buildStatus = 'passed'
+    } else if (sandboxResults.build?.status === 'sandbox_unavailable') {
+      buildStatus = 'sandbox_unavailable'
+    } else if (sandboxResults.build?.status === 'skipped') {
+      buildStatus = 'skipped'
+    } else if (allowSimulatedInTests && !sandboxUnavailable) {
+      buildStatus = 'passed'
+    }
 
-  let testsStatus = 'not_executed'
-  if (!testsCompatPassed || sandboxResults.tests?.status === 'failed') {
-    testsStatus = 'failed'
-    failedStep = failedStep || 'tests'
-  } else if (sandboxResults.tests?.status === 'passed') {
-    testsStatus = 'passed'
-  } else if (sandboxResults.tests?.status === 'skipped') {
-    testsStatus = testFiles.length === 0 ? 'skipped' : 'not_executed'
-  } else if (allowSimulatedInTests) {
-    testsStatus = 'passed'
-  }
+    let testsStatus = 'not_executed'
+    if (!testsCompatPassed || sandboxResults.tests?.status === 'failed') {
+      testsStatus = 'failed'
+      failedStep = failedStep || 'tests'
+    } else if (sandboxResults.tests?.status === 'passed') {
+      testsStatus = 'passed'
+    } else if (sandboxResults.tests?.status === 'sandbox_unavailable') {
+      testsStatus = 'sandbox_unavailable'
+    } else if (sandboxResults.tests?.status === 'skipped') {
+      testsStatus = testFiles.length === 0 ? 'skipped' : 'not_executed'
+    } else if (allowSimulatedInTests && !sandboxUnavailable) {
+      testsStatus = 'passed'
+    }
 
-  const executionStatus =
-    buildStatus === 'failed' || testsStatus === 'failed'
-      ? 'failed'
-      : buildStatus === 'passed' && testsStatus === 'passed'
-      ? 'passed'
-      : 'not_executed'
+    const typecheckExecStatus = sandboxResults.typecheck?.status || (typecheckPassed ? 'not_executed' : 'failed')
 
-  const safeToPropose =
-    lintPassed &&
-    typecheckPassed &&
-    buildStatus === 'passed' &&
-    testsStatus === 'passed' &&
-    guardrails.passed &&
-    policy.status === 'ALLOWED'
+    const executionStatus =
+      buildStatus === 'failed' || testsStatus === 'failed'
+        ? 'failed'
+        : sandboxUnavailable
+        ? 'sandbox_unavailable'
+        : buildStatus === 'passed' && testsStatus === 'passed'
+        ? 'passed'
+        : 'not_executed'
 
-  // Determine explicit pipeline state:
-  // 1) Explicit policy block -> PR_BLOCKED
-  // 2) Actual validation / execution failure -> VALIDATION_FAILED (even if policy is UNKNOWN)
-  // 3) High-risk change requiring human sign-off -> HUMAN_REVIEW_REQUIRED
-  // 4) Policy missing/unknown -> POLICY_UNKNOWN
-  // 5) Unexecuted or skipped build/tests -> HUMAN_REVIEW_REQUIRED
-  // 6) Everything genuinely executed & passed + ALLOWED -> PR_ELIGIBLE
-  let state = 'PR_ELIGIBLE'
-  if (policy.status === 'BLOCKED') {
-    state = 'PR_BLOCKED'
-  } else if (
-    !lintPassed ||
-    !typecheckPassed ||
-    buildStatus === 'failed' ||
-    testsStatus === 'failed' ||
-    (!guardrails.passed && !guardrails.isHighRisk)
-  ) {
-    state = 'VALIDATION_FAILED'
-    failedStep = failedStep || (!guardrails.passed ? 'security_guardrails' : 'validation')
-  } else if (guardrails.isHighRisk && !confirmedHighRisk) {
-    state = 'HUMAN_REVIEW_REQUIRED'
-    failedStep = failedStep || 'human_review'
-  } else if (policy.status === 'UNKNOWN') {
-    state = 'POLICY_UNKNOWN'
-  } else if (buildStatus !== 'passed' || testsStatus !== 'passed') {
-    state = 'HUMAN_REVIEW_REQUIRED'
-  }
+    const safeToPropose =
+      !sandboxUnavailable &&
+      lintPassed &&
+      typecheckPassed &&
+      buildStatus === 'passed' &&
+      testsStatus === 'passed' &&
+      guardrails.passed &&
+      policy.status === 'ALLOWED'
 
-  const status = safeToPropose
-    ? 'verified'
-    : state === 'PR_BLOCKED'
-    ? 'blocked'
-    : state === 'VALIDATION_FAILED'
-    ? 'validation_failed'
-    : state === 'POLICY_UNKNOWN'
-    ? 'policy_unknown'
-    : 'review_required'
+    // Determine explicit pipeline state:
+    // 1) Explicit policy block -> PR_BLOCKED
+    // 2) Actual validation / execution failure -> VALIDATION_FAILED (even if policy is UNKNOWN or sandbox unavailable)
+    // 3) Sandbox unavailable in fail-closed mode -> SANDBOX_UNAVAILABLE
+    // 4) High-risk change requiring human sign-off -> HUMAN_REVIEW_REQUIRED
+    // 5) Policy missing/unknown -> POLICY_UNKNOWN
+    // 6) Unexecuted or skipped build/tests -> HUMAN_REVIEW_REQUIRED
+    // 7) Everything genuinely executed & passed + ALLOWED -> PR_ELIGIBLE
+    let state = 'PR_ELIGIBLE'
+    if (policy.status === 'BLOCKED') {
+      state = 'PR_BLOCKED'
+    } else if (
+      !lintPassed ||
+      !typecheckPassed ||
+      buildStatus === 'failed' ||
+      testsStatus === 'failed' ||
+      (!guardrails.passed && !guardrails.isHighRisk)
+    ) {
+      state = 'VALIDATION_FAILED'
+      failedStep = failedStep || (!guardrails.passed ? 'security_guardrails' : 'validation')
+    } else if (sandboxUnavailable) {
+      state = 'SANDBOX_UNAVAILABLE'
+      failedStep = 'sandbox_unavailable'
+    } else if (guardrails.isHighRisk && !confirmedHighRisk) {
+      state = 'HUMAN_REVIEW_REQUIRED'
+      failedStep = failedStep || 'human_review'
+    } else if (policy.status === 'UNKNOWN') {
+      state = 'POLICY_UNKNOWN'
+    } else if (buildStatus !== 'passed' || testsStatus !== 'passed') {
+      state = 'HUMAN_REVIEW_REQUIRED'
+    }
 
-  const resolvedFailedStep = safeToPropose
-    ? null
-    : state === 'PR_BLOCKED'
-    ? 'contribution_policy'
-    : state === 'VALIDATION_FAILED'
-    ? failedStep
-    : state === 'POLICY_UNKNOWN'
-    ? 'contribution_policy'
-    : failedStep || 'human_review'
+    const status = safeToPropose
+      ? 'verified'
+      : state === 'PR_BLOCKED'
+      ? 'blocked'
+      : state === 'VALIDATION_FAILED'
+      ? 'validation_failed'
+      : state === 'SANDBOX_UNAVAILABLE'
+      ? 'sandbox_unavailable'
+      : state === 'POLICY_UNKNOWN'
+      ? 'policy_unknown'
+      : 'review_required'
 
-  const pipelineSteps = [
-    { step: 'ast_analysis', name: 'AST Analysis', status: 'passed' },
-    { step: 'hotspot_detection', name: 'Hotspot Detection', status: 'passed' },
-    { step: 'language_detection', name: 'Language & Framework Detection', status: 'passed', details: `${targetLanguage} (${expectedTestFramework})` },
-    { step: 'refactor_generation', name: 'Refactor Generation', status: 'passed', details: `${allFiles.length} files generated` },
-    { step: 'syntax_validation', name: 'Static Syntax Validation', status: lintPassed ? 'passed' : 'failed' },
-    { step: 'import_validation', name: 'Dependency & Import Boundary Validation', status: typecheckPassed ? 'passed' : 'failed' },
-    {
-      step: 'test_framework_validation',
-      name: 'Test-Framework Compatibility & Execution',
-      status: testsStatus,
-      details: `${expectedTestFramework} (${testsStatus === 'passed' ? 'Executed & Passed' : testsStatus === 'failed' ? 'Failed' : testsStatus === 'skipped' ? 'Skipped (No Tests)' : 'Not Executed'})`,
-    },
-    {
-      step: 'generated_code_validation',
-      name: 'Build / Compile Execution',
-      status: buildStatus,
-    },
-    { step: 'security_checks', name: 'Security Guardrails & Secret Checks', status: guardrails.passed ? 'passed' : (guardrails.isHighRisk ? 'review_required' : 'failed') },
-    { step: 'repository_policy', name: 'Repository Contribution Policy', status: policy.status.toLowerCase(), details: policy.policyFile || `Policy Status: ${policy.status}` },
-    { step: 'human_approval', name: 'Human Review Requirement', status: state === 'PR_ELIGIBLE' ? 'ready' : (state === 'HUMAN_REVIEW_REQUIRED' || state === 'POLICY_UNKNOWN' ? 'required' : 'blocked') },
-    { step: 'pr_creation', name: 'GitHub PR Status', status: state === 'PR_ELIGIBLE' ? 'ready' : 'blocked' },
-  ]
+    const resolvedFailedStep = safeToPropose
+      ? null
+      : state === 'PR_BLOCKED'
+      ? 'contribution_policy'
+      : state === 'VALIDATION_FAILED'
+      ? failedStep
+      : state === 'SANDBOX_UNAVAILABLE'
+      ? 'sandbox_unavailable'
+      : state === 'POLICY_UNKNOWN'
+      ? 'contribution_policy'
+      : failedStep || 'human_review'
 
-  const validationBreakdown = {
-    staticAnalysis: lintPassed ? 'passed' : 'failed',
-    syntaxValidation: lintPassed ? 'passed' : 'failed',
-    dependencyValidation: typecheckPassed ? 'passed' : 'failed',
-    testFrameworkCompatibility: testFiles.length === 0 ? 'skipped' : (testsCompatPassed ? 'passed' : 'failed'),
-    testsExecuted: testsStatus,
-    buildExecuted: buildStatus,
-    lintExecution: sandboxResults.lint?.status || (lintPassed ? 'passed' : 'failed'),
-    typecheckExecution: sandboxResults.typecheck?.status || (typecheckPassed ? 'not_executed' : 'failed'),
-    securityGuardrails: guardrails.passed ? 'passed' : (guardrails.isHighRisk && !confirmedHighRisk ? 'unknown' : 'failed'),
-    contributionPolicy: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'failed' : 'unknown'),
-    humanReviewRequirement: safeToPropose ? 'passed' : (state === 'HUMAN_REVIEW_REQUIRED' || state === 'POLICY_UNKNOWN' ? 'unknown' : 'failed'),
-    githubPullRequestStatus: 'not_executed',
-  }
+    const pipelineSteps = [
+      { step: 'ast_analysis', name: 'AST Analysis', status: 'passed' },
+      { step: 'hotspot_detection', name: 'Hotspot Detection', status: 'passed' },
+      { step: 'language_detection', name: 'Language & Framework Detection', status: 'passed', details: `${targetLanguage} (${expectedTestFramework})` },
+      { step: 'refactor_generation', name: 'Refactor Generation', status: 'passed', details: `${allFiles.length} files generated` },
+      { step: 'syntax_validation', name: 'Static Syntax Validation', status: lintPassed ? 'passed' : 'failed' },
+      { step: 'import_validation', name: 'Dependency & Import Boundary Validation', status: typecheckPassed ? 'passed' : 'failed' },
+      {
+        step: 'sandbox_availability',
+        name: 'Isolated Sandbox Availability',
+        status: sandboxUnavailable ? 'sandbox_unavailable' : 'passed',
+        details: sandboxUnavailable ? (sandboxResults.unavailableReason || 'Isolated sandbox unavailable') : sandboxResults.executionEnvironment,
+      },
+      {
+        step: 'test_framework_validation',
+        name: 'Test-Framework Compatibility & Execution',
+        status: testsStatus,
+        details: `${expectedTestFramework} (${testsStatus === 'passed' ? 'Executed & Passed' : testsStatus === 'failed' ? 'Failed' : testsStatus === 'sandbox_unavailable' ? 'Sandbox Unavailable' : testsStatus === 'skipped' ? 'Skipped (No Tests)' : 'Not Executed'})`,
+      },
+      {
+        step: 'generated_code_validation',
+        name: 'Build / Compile Execution',
+        status: buildStatus,
+      },
+      { step: 'security_checks', name: 'Security Guardrails & Secret Checks', status: guardrails.passed ? 'passed' : (guardrails.isHighRisk ? 'review_required' : 'failed') },
+      { step: 'repository_policy', name: 'Repository Contribution Policy', status: policy.status.toLowerCase(), details: policy.policyFile || `Policy Status: ${policy.status}` },
+      { step: 'human_approval', name: 'Human Review Requirement', status: state === 'PR_ELIGIBLE' ? 'ready' : (state === 'HUMAN_REVIEW_REQUIRED' || state === 'POLICY_UNKNOWN' || state === 'SANDBOX_UNAVAILABLE' ? 'required' : 'blocked') },
+      { step: 'pr_creation', name: 'GitHub PR Status', status: state === 'PR_ELIGIBLE' ? 'ready' : 'blocked' },
+    ]
 
-  return {
-    status,
-    state,
-    failedStep: resolvedFailedStep,
-    executionEnvironment: sandboxResults.executionEnvironment,
-    exitCodes: {
-      lint: sandboxResults.lint?.exitCode ?? null,
-      typecheck: sandboxResults.typecheck?.exitCode ?? null,
-      build: sandboxResults.build?.exitCode ?? null,
-      tests: sandboxResults.tests?.exitCode ?? null,
-    },
-    language: {
-      targetLanguage,
-      testFramework: expectedTestFramework,
-    },
-    policy,
-    validation: {
-      lint: lintPassed ? 'passed' : 'failed',
-      typecheck: typecheckPassed ? 'passed' : 'failed',
-      build: buildStatus,
-      tests: testsStatus,
-      policy: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'blocked' : 'unknown'),
+    const validationBreakdown = {
+      staticAnalysis: lintPassed ? 'passed' : 'failed',
       syntaxValidation: lintPassed ? 'passed' : 'failed',
       dependencyValidation: typecheckPassed ? 'passed' : 'failed',
-      staticValidation: (lintPassed && typecheckPassed) ? 'passed' : 'failed',
-      executionValidation: executionStatus,
-      testFrameworkValidation: testsCompatPassed ? 'passed' : 'failed',
-      securityValidation: guardrails.passed ? 'passed' : 'failed',
-      policyValidation: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'blocked' : 'unknown'),
-      safeToPropose,
-    },
-    validationBreakdown,
-    guardrails,
-    pipelineSteps,
-    logs,
-  }
+      testFrameworkCompatibility: testFiles.length === 0 ? 'skipped' : (testsCompatPassed ? 'passed' : 'failed'),
+      sandboxAvailability: sandboxUnavailable ? 'sandbox_unavailable' : 'passed',
+      testsExecuted: testsStatus,
+      buildExecuted: buildStatus,
+      lintExecution: sandboxResults.lint?.status || (lintPassed ? 'passed' : 'failed'),
+      typecheckExecution: typecheckExecStatus,
+      securityGuardrails: guardrails.passed ? 'passed' : (guardrails.isHighRisk && !confirmedHighRisk ? 'unknown' : 'failed'),
+      contributionPolicy: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'failed' : 'unknown'),
+      humanReviewRequirement: safeToPropose ? 'passed' : (state === 'HUMAN_REVIEW_REQUIRED' || state === 'POLICY_UNKNOWN' || state === 'SANDBOX_UNAVAILABLE' ? 'unknown' : 'failed'),
+      githubPullRequestStatus: 'not_executed',
+    }
+
+    return {
+      jobId,
+      status,
+      state,
+      sandboxAvailable: !sandboxUnavailable,
+      sandboxStatus: sandboxUnavailable ? 'SANDBOX_UNAVAILABLE' : 'AVAILABLE',
+      unavailableReason: sandboxResults.unavailableReason || null,
+      failedStep: resolvedFailedStep,
+      executionEnvironment: sandboxResults.executionEnvironment,
+      exitCodes: {
+        lint: sandboxResults.lint?.exitCode ?? null,
+        typecheck: sandboxResults.typecheck?.exitCode ?? null,
+        build: sandboxResults.build?.exitCode ?? null,
+        tests: sandboxResults.tests?.exitCode ?? null,
+      },
+      language: {
+        targetLanguage,
+        testFramework: expectedTestFramework,
+      },
+      policy,
+      validation: {
+        lint: lintPassed ? 'passed' : 'failed',
+        typecheck: typecheckPassed ? 'passed' : 'failed',
+        build: buildStatus,
+        tests: testsStatus,
+        policy: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'blocked' : 'unknown'),
+        syntaxValidation: lintPassed ? 'passed' : 'failed',
+        dependencyValidation: typecheckPassed ? 'passed' : 'failed',
+        staticValidation: (lintPassed && typecheckPassed) ? 'passed' : 'failed',
+        executionValidation: executionStatus,
+        sandboxAvailability: sandboxUnavailable ? 'sandbox_unavailable' : 'passed',
+        testFrameworkValidation: testsCompatPassed ? 'passed' : 'failed',
+        securityValidation: guardrails.passed ? 'passed' : 'failed',
+        policyValidation: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'blocked' : 'unknown'),
+        safeToPropose,
+      },
+      validationBreakdown,
+      guardrails,
+      pipelineSteps,
+      logs,
+    }
+  })
 }
 
 function validatePythonSyntax(filePath, content) {

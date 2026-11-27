@@ -16,7 +16,7 @@ analyzeRouter.post('/analyze', analyzeRateLimiter, async (request, response, nex
     const userId = authUser?.userId || null
     const userToken = authUser?.token || null
 
-    const analyzedData = await analyzeRepository(repositoryUrl, userToken)
+    const analyzedData = await analyzeRepository(repositoryUrl, userToken, null, userId)
     const savedRecord = await saveAnalysis(analyzedData, userId)
     response.json(savedRecord)
   } catch (error) {
@@ -75,7 +75,7 @@ async function handleAnalyzeStream(request, response, next) {
       sendEvent('agent_event', agentEvent)
     }
 
-    const analyzedData = await analyzeRepository(repositoryUrl, userToken, onProgress)
+    const analyzedData = await analyzeRepository(repositoryUrl, userToken, onProgress, userId)
     const savedRecord = await saveAnalysis(analyzedData, userId)
 
     sendEvent('complete', savedRecord)

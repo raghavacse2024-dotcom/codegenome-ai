@@ -8,7 +8,7 @@ import { runAnalysis } from '../agents.js'
  * @param {((event: object) => void)|null} onProgress Optional real-time progress callback.
  * @returns {Promise<object>} Completed analysis with explicit live vs fallback flags and coverage metadata.
  */
-export async function analyzeRepository(repositoryUrl, token = null, onProgress = null) {
+export async function analyzeRepository(repositoryUrl, token = null, onProgress = null, userId = 'anonymous') {
   const analysis = await withTimeout(async () => {
     if (typeof onProgress === 'function') {
       onProgress({
@@ -20,6 +20,7 @@ export async function analyzeRepository(repositoryUrl, token = null, onProgress 
     }
 
     const repository = await fetchRepository(repositoryUrl, token)
+    repository.userId = userId || 'anonymous'
 
     if (typeof onProgress === 'function') {
       const covLabel = repository.metadata?.completeness || 'sample-based'
