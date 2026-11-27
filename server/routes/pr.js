@@ -3,17 +3,18 @@ import { z } from 'zod'
 import { getAnalysis } from '../services/analysisStore.js'
 import { createPullRequest } from '../services/prService.js'
 import { validateRefactor } from '../services/refactorValidator.js'
-import { validatePrGuardrails } from '../services/prGuardrails.js'
-import { resolveAuthenticatedUser, assertAnalysisOwnership, requireAuthenticatedUser } from '../services/authResolver.js'
+import { resolveAuthenticatedUser, assertAnalysisOwnership } from '../services/authResolver.js'
+import { prRateLimiter } from '../middleware/rateLimiter.js'
+import { validateGitBranchName, validateRepoSegment } from '../services/urlSecurity.js'
 
 export const prRouter = Router()
 
 const CreatePrSchema = z.object({
   analysisId: z.string().min(1),
-  title: z.string().optional(),
-  branch: z.string().optional(),
-  body: z.string().optional(),
-  baseBranch: z.string().optional(),
+  title: z.string().max(200).optional(),
+  branch: z.string().max(120).optional(),
+  body: z.string().max(8000).optional(),
+  baseBranch: z.string().max(120).optional(),
   confirmedHighRisk: z.boolean().optional(),
 })
 
@@ -21,7 +22,7 @@ const CreatePrSchema = z.object({
  * Validates a refactor package in sandbox without pushing changes.
  * Protected by analysis ownership verification.
  */
-prRouter.post('/pr/validate', async (req, res, next) => {
+prRouter.post('/pr/validate', prRateLimiter, async (req, res, next) => {
   try {
     const authUser = await resolveAuthenticatedUser(req)
     if (!authUser) {
@@ -61,6 +62,9 @@ prRouter.post('/pr/validate', async (req, res, next) => {
       policy: validation.policy,
       language: validation.language,
       validation: validation.validation,
+      validationBreakdown: validation.validationBreakdown,
+      executionEnvironment: validation.executionEnvironment,
+      exitCodes: validation.exitCodes,
       guardrails: validation.guardrails,
       failedStep: validation.failedStep,
       logs: validation.logs,
@@ -74,7 +78,7 @@ prRouter.post('/pr/validate', async (req, res, next) => {
  * Creates an automated Pull Request for the refactor recommendation.
  * Requires authenticated user, verified analysis ownership, and authenticated GitHub credentials.
  */
-prRouter.post('/pr/create', async (req, res, next) => {
+prRouter.post('/pr/create', prRateLimiter, async (req, res, next) => {
   try {
     const authUser = await resolveAuthenticatedUser(req)
     if (!authUser) {
@@ -95,6 +99,13 @@ prRouter.post('/pr/create', async (req, res, next) => {
       return res.status(400).json({ error: 'Analysis record does not contain valid repository details.' })
     }
 
+    const cleanOwner = validateRepoSegment(repo.owner, 'owner')
+    const cleanRepo = validateRepoSegment(repo.repository, 'repository')
+    const cleanBranch = branch ? validateGitBranchName(branch) : undefined
+    const cleanBaseBranch = baseBranch
+      ? validateGitBranchName(baseBranch)
+      : validateGitBranchName(repo.defaultBranch || 'main')
+
     // Resolve user auth token & user profile strictly
     let token = authUser.token || null
     let user = authUser.user || null
@@ -109,7 +120,6 @@ prRouter.post('/pr/create', async (req, res, next) => {
     const refactoredTarget = refactorData.refactoredTarget
     const targetPath = refactorData.target
 
-    // Collect files to commit: new scaffolds + refactored target if applicable
     const filesToCommit = [...scaffolds]
     if (targetPath && refactoredTarget) {
       if (!filesToCommit.some((f) => f.path === targetPath)) {
@@ -133,11 +143,11 @@ prRouter.post('/pr/create', async (req, res, next) => {
     const rawPatch = refactorData.diff?.rawPatch || ''
 
     const result = await createPullRequest({
-      owner: repo.owner,
-      repository: repo.repository,
-      defaultBranch: baseBranch || repo.defaultBranch || 'main',
+      owner: cleanOwner,
+      repository: cleanRepo,
+      defaultBranch: cleanBaseBranch,
       title: title || refactorData.pullRequestTitle,
-      branch,
+      branch: cleanBranch,
       body,
       files: filesToCommit,
       baseFiles: analysis.files || [],
@@ -168,7 +178,7 @@ prRouter.post('/pr/create', async (req, res, next) => {
  * Returns raw unified patch for an analysis.
  * Enforces ownership verification.
  */
-prRouter.get('/pr/patch/:analysisId', async (req, res, next) => {
+prRouter.get('/pr/patch/:analysisId', prRateLimiter, async (req, res, next) => {
   try {
     const authUser = await resolveAuthenticatedUser(req)
     if (!authUser) {

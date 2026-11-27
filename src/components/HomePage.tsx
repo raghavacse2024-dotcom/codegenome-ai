@@ -834,8 +834,8 @@ export function compileAST(node: ASTNode): Result {
                 <circle cx="280" cy="45" r="2.5" fill="#22c55e" />
 
                 {/* GitHub PR badge */}
-                <rect x="95" y="60" width="130" height="22" rx="3" fill="#18181b" stroke="#22c55e" strokeWidth="1" />
-                <text x="160" y="74" textAnchor="middle" fill="#22c55e" fontSize="9" fontWeight="600" fontFamily="monospace">PR #108: Auto-Merge OK</text>
+                <rect x="85" y="60" width="150" height="22" rx="3" fill="#18181b" stroke="#22c55e" strokeWidth="1" />
+                <text x="160" y="74" textAnchor="middle" fill="#22c55e" fontSize="8.5" fontWeight="600" fontFamily="monospace">PR #108: Human Review Ready</text>
               </svg>
             </div>
 

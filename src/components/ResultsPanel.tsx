@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Copy, Check, FileCode, Server, Activity, ArrowRight, ShieldCheck, Zap, Code2, Network, GitPullRequest, GitBranch, FileDiff as FileDiffIcon, ShieldAlert, AlertTriangle, AlertCircle, CheckCircle } from 'lucide-react'
-import type { Analysis, Scaffold, Hotspot } from '../types'
+import { Copy, Check, FileCode, Server, Activity, ShieldCheck, Zap, Code2, GitPullRequest, FileDiff as FileDiffIcon, ShieldAlert, AlertTriangle, AlertCircle, CheckCircle } from 'lucide-react'
+import type { Analysis, Scaffold, Hotspot, StructuredFinding } from '../types'
 import { useCountUp } from '../hooks/useCountUp'
 import { DemoModeBadge } from './DemoModeBadge'
 import { DownloadButton } from './DownloadButton'
@@ -10,6 +10,7 @@ import { RepositoryQA } from './RepositoryQA'
 import { AstAnalysisDetailModal } from './AstAnalysisDetailModal'
 import { GitDiffViewer } from './GitDiffViewer'
 import { AutomatedPrModal } from './AutomatedPrModal'
+import { ValidationDashboard } from './ValidationDashboard'
 
 function ScaffoldCard({ file, index }: { file: Scaffold; index: number }) {
   const [copied, setCopied] = useState(false)
@@ -86,44 +87,66 @@ export function ResultsPanel({ analysis, user }: { analysis: Analysis; user?: { 
     >
       <DemoModeBadge isDemo={analysis.isDemo} user={user} />
 
-      {/* Transparent Repository Sampling Notice */}
-      <div 
-        className="sampling-transparency-banner"
-        style={{
-          margin: '10px 0 16px 0',
-          padding: '10px 14px',
-          borderRadius: '8px',
-          background: 'rgba(34, 197, 94, 0.07)',
-          border: '1px solid rgba(34, 197, 94, 0.22)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '12px',
-          color: '#d1fae5',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Activity size={14} style={{ color: 'var(--neon)' }} />
-          <span>
-            <strong>Sample-based repository analysis:</strong>{' '}
-            {analysis.metadata?.samplingNotice || `Analysis based on ${architecture.data.structure.sampledFileCount} sampled source files.`}
-          </span>
-        </div>
-        {analysis.metadata?.analysisCoverage && (
-          <span style={{
-            fontSize: '11px',
-            background: 'rgba(34, 197, 94, 0.2)',
-            padding: '2px 8px',
-            borderRadius: '12px',
-            color: '#4ade80',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
-            marginLeft: '8px',
-          }}>
-            {analysis.metadata.analysisCoverage} Coverage
-          </span>
-        )}
-      </div>
+      {/* Transparent Repository Coverage / Synthetic Fallback Notice */}
+      {(() => {
+        const completeness = analysis.metadata?.completeness || (analysis.isFallback ? 'unavailable' : analysis.metadata?.samplingUsed ? 'sample-based' : 'complete')
+        const isSyntheticFallback = Boolean(analysis.isFallback || analysis.fallbackReason || completeness === 'unavailable')
+        const titleLabel = isSyntheticFallback
+          ? 'Synthetic Demo Fallback:'
+          : completeness === 'complete'
+          ? 'Complete Repository Analysis:'
+          : completeness === 'partial'
+          ? 'Partial Repository Analysis:'
+          : 'Sample-Based Repository Analysis:'
+
+        return (
+          <div
+            className="sampling-transparency-banner"
+            style={{
+              margin: '10px 0 16px 0',
+              padding: '10px 14px',
+              borderRadius: '8px',
+              background: isSyntheticFallback ? 'rgba(245, 158, 11, 0.1)' : 'rgba(34, 197, 94, 0.07)',
+              border: isSyntheticFallback ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid rgba(34, 197, 94, 0.22)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '12px',
+              color: isSyntheticFallback ? '#fde68a' : '#d1fae5',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {isSyntheticFallback ? (
+                <AlertTriangle size={14} style={{ color: '#fbbf24' }} />
+              ) : (
+                <Activity size={14} style={{ color: 'var(--neon)' }} />
+              )}
+              <span>
+                <strong>{titleLabel}</strong>{' '}
+                {analysis.metadata?.samplingNotice ||
+                  `Analysis based on ${architecture.data.structure.sampledFileCount} indexed source files.`}
+                {analysis.metadata?.cacheHit && ' (Cached snapshot)'}
+              </span>
+            </div>
+            {analysis.metadata?.analysisCoverage && (
+              <span
+                style={{
+                  fontSize: '11px',
+                  background: isSyntheticFallback ? 'rgba(245, 158, 11, 0.22)' : 'rgba(34, 197, 94, 0.2)',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  color: isSyntheticFallback ? '#fcd34d' : '#4ade80',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  marginLeft: '8px',
+                }}
+              >
+                {analysis.metadata.analysisCoverage} Coverage · {completeness.toUpperCase()}
+              </span>
+            )}
+          </div>
+        )
+      })()}
 
       <section className="score-row">
         <motion.article className="score-card" variants={panelVariant}>
@@ -244,6 +267,83 @@ export function ResultsPanel({ analysis, user }: { analysis: Analysis; user?: { 
           )) : <p className="empty-state">No major static-analysis hotspots in the sampled files.</p>}
         </div>
       </motion.section>
+
+      {/* Structured Agent Findings (Static Analysis vs AI Reasoning) */}
+      {(() => {
+        const allFindings: Array<StructuredFinding & { agent: string }> = [
+          ...(architecture.data.findings || []).map((f) => ({ ...f, agent: 'Architecture' })),
+          ...(debt.data.findings || []).map((f) => ({ ...f, agent: 'Technical Debt' })),
+          ...(cost.data.findings || []).map((f) => ({ ...f, agent: 'Risk & Cost' })),
+          ...(refactor.data.findings || []).map((f) => ({ ...f, agent: 'Refactor Planner' })),
+          ...(review.data.findings || []).map((f) => ({ ...f, agent: 'Review' })),
+        ]
+        if (allFindings.length === 0) return null
+
+        return (
+          <motion.section className="panel" variants={panelVariant}>
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Multi-Agent Evidence Log</p>
+                <h2>Structured Findings</h2>
+              </div>
+              <span className="panel-tag">{allFindings.length} verified findings</span>
+            </div>
+            <div style={{ display: 'grid', gap: '10px', marginTop: '10px' }}>
+              {allFindings.slice(0, 10).map((finding) => (
+                <div
+                  key={`${finding.agent}-${finding.id}`}
+                  style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    background: 'rgba(15, 23, 42, 0.45)',
+                    border: '1px solid rgba(148, 163, 184, 0.16)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: '13px', color: 'var(--text-primary, #f1f5f9)' }}>{finding.title}</strong>
+                      <span className="ast-pill">{finding.agent}</span>
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontFamily: 'DM Mono, monospace',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: finding.origin === 'static-analysis' ? 'rgba(56, 189, 248, 0.14)' : 'rgba(168, 85, 247, 0.16)',
+                          color: finding.origin === 'static-analysis' ? '#38bdf8' : '#c084fc',
+                          border: finding.origin === 'static-analysis' ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid rgba(168, 85, 247, 0.35)',
+                        }}
+                      >
+                        {finding.origin === 'static-analysis' ? 'Static Analysis' : 'AI Reasoning'}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '11px', fontFamily: 'DM Mono, monospace', color: '#94a3b8' }}>
+                      {finding.severity.toUpperCase()} · {Math.round((finding.confidence || 0.75) * 100)}% conf.
+                    </span>
+                  </div>
+                  <p style={{ margin: '6px 0', fontSize: '12px', color: 'var(--text-muted, #cbd5e1)' }}>{finding.explanation}</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', fontSize: '11px', color: '#94a3b8' }}>
+                    {finding.filePath && (
+                      <span>
+                        <strong>Location:</strong> <code>{finding.filePath}{finding.lineNumbers ? `:${finding.lineNumbers}` : ''}</code>
+                      </span>
+                    )}
+                    <span>
+                      <strong>Evidence:</strong> {finding.evidence}
+                    </span>
+                  </div>
+                  <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#86efac' }}>
+                    <strong>Suggested Improvement:</strong> {finding.suggestedImprovement}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </motion.section>
+        )
+      })()}
+
+      {/* 12-Point Execution & Trust Validation Dashboard */}
+      <ValidationDashboard analysis={analysis} />
 
       <motion.section className="panel" variants={panelVariant}>
         {(() => {

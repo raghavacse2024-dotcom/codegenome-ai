@@ -11,6 +11,8 @@ interface ChatMessage {
   timestamp: string
   confidence?: number
   sourceFiles?: string[]
+  citations?: Array<{ filePath: string; startLine: number; endLine: number; symbols?: string[] }>
+  insufficientEvidence?: boolean
   provider?: string
 }
 
@@ -81,6 +83,8 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         confidence: res.confidence,
         sourceFiles: res.sourceFiles,
+        citations: res.citations,
+        insufficientEvidence: res.insufficientEvidence,
         provider: res.provider || 'CodeGenome AI',
       }
       setMessages((prev) => [...prev, botMsg])
@@ -185,10 +189,17 @@ export function RepositoryQA({ analysisId }: { analysisId: string }) {
 
                 {msg.role === 'assistant' && (
                   <div className="qa-msg-footer">
-                    {msg.sourceFiles && msg.sourceFiles.length > 0 && (
+                    {((msg.citations && msg.citations.length > 0) || (msg.sourceFiles && msg.sourceFiles.length > 0)) && (
                       <div className="qa-source-files">
                         <FileCode size={11} />
-                        <span>{msg.sourceFiles.slice(0, 2).join(', ')}</span>
+                        <span>
+                          {msg.citations && msg.citations.length > 0
+                            ? msg.citations
+                                .slice(0, 3)
+                                .map((c) => `${c.filePath}:L${c.startLine}-${c.endLine}`)
+                                .join(', ')
+                            : msg.sourceFiles?.slice(0, 2).join(', ')}
+                        </span>
                       </div>
                     )}
                     <button

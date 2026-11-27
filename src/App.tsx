@@ -151,16 +151,11 @@ export default function App() {
           try {
             localStorage.setItem('codegenome_github_user', JSON.stringify(res.user))
           } catch {}
-        } else if (cachedUser) {
-          // Never log user out on refresh if cached profile exists; re-sync session with server
+        } else if (cachedUser && getSessionToken()) {
           setUser(cachedUser)
-          const sId = getSessionToken() || `cg_session_${cachedUser.login}`
-          setSessionToken(sId)
-          registerSession(sId, cachedUser).catch(() => {})
         }
       })
       .catch(() => {
-        // Keep cached state resiliently on any network hiccups
         if (cachedUser) {
           setUser(cachedUser)
         }
@@ -421,11 +416,22 @@ export default function App() {
                     exit={{ opacity: 0, scale: 0.95 }}
                   >
                     <span className="error-icon" aria-hidden="true"><AlertTriangle size={16}/></span>
-                    <div>
-                      <strong>SYSTEM ERROR.</strong>
+                    <div style={{ flex: 1 }}>
+                      <strong>ANALYSIS ERROR.</strong>
                       <p>{error}</p>
-                      <small>Verify repository access permissions. Rate limits may apply.</small>
+                      <small>Verify repository URL, permissions, or network connectivity and retry.</small>
                     </div>
+                    {url && (
+                      <button
+                        type="button"
+                        className="run-button"
+                        onClick={() => analyze(url)}
+                        disabled={loading}
+                        style={{ whiteSpace: 'nowrap', marginLeft: '12px' }}
+                      >
+                        <Play size={13} /> Retry
+                      </button>
+                    )}
                   </motion.section>
                 )}
               </AnimatePresence>

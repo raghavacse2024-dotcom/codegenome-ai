@@ -80,7 +80,7 @@ describe('calculator', () => {
     expect(result.failedStep).toBe('build')
   })
 
-  it('validates and approves valid Python refactor with unittest test suite', async () => {
+  it('executes valid Python unittest test suite in isolated sandbox and separates execution from policy status', async () => {
     const files = [
       {
         path: 'src/calculator.py',
@@ -100,24 +100,39 @@ class TestCalculator(unittest.TestCase):
       },
     ]
 
-    const baseFiles = [
+    const baseFilesNoPolicy = [
       { path: 'setup.cfg', content: '[unittest]\ntest_runner = unittest\n' },
     ]
 
-    const result = await validateRefactor({
+    // Without CONTRIBUTING.md, real Python execution passes while policy stays UNKNOWN
+    const unknownPolicyResult = await validateRefactor({
       files,
       targetPath: 'src/calculator.py',
-      refactoredTarget: 'from .calculator_module import add\n',
-      baseFiles,
+      baseFiles: baseFilesNoPolicy,
     })
 
-    expect(result.status).toBe('verified')
-    expect(result.state).toBe('PR_ELIGIBLE')
-    expect(result.validation.safeToPropose).toBe(true)
-    expect(result.validation.lint).toBe('passed')
-    expect(result.validation.syntaxValidation).toBe('passed')
-    expect(result.validation.testFrameworkValidation).toBe('passed')
-    expect(result.validation.tests).toBe('not_executed')
+    expect(unknownPolicyResult.validation.lint).toBe('passed')
+    expect(unknownPolicyResult.validation.build).toBe('passed')
+    expect(unknownPolicyResult.validation.tests).toBe('passed')
+    expect(unknownPolicyResult.state).toBe('POLICY_UNKNOWN')
+    expect(unknownPolicyResult.validation.safeToPropose).toBe(false)
+
+    // With explicit CONTRIBUTING.md permitting contributions, full PR eligibility is earned genuinely
+    const allowedResult = await validateRefactor({
+      files,
+      targetPath: 'src/calculator.py',
+      baseFiles: [
+        ...baseFilesNoPolicy,
+        { path: 'CONTRIBUTING.md', content: 'Automated pull requests with passing tests are welcome.' },
+      ],
+    })
+
+    expect(allowedResult.status).toBe('verified')
+    expect(allowedResult.state).toBe('PR_ELIGIBLE')
+    expect(allowedResult.validation.safeToPropose).toBe(true)
+    expect(allowedResult.validation.lint).toBe('passed')
+    expect(allowedResult.validation.build).toBe('passed')
+    expect(allowedResult.validation.tests).toBe('passed')
   })
 
   it('detects AGENTS.md in policyFiles even when policyFiles is not part of baseFiles', async () => {

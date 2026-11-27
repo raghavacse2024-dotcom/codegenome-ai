@@ -3,6 +3,7 @@ import { Router } from 'express'
 import { AnalysisIdSchema } from '../contracts.js'
 import { getAnalysis } from '../services/analysisStore.js'
 import { resolveAuthenticatedUser, assertAnalysisOwnership } from '../services/authResolver.js'
+import { downloadRateLimiter } from '../middleware/rateLimiter.js'
 
 export const downloadRouter = Router()
 
@@ -46,17 +47,17 @@ async function handleDownload(rawId, request, response, next) {
 }
 
 // Support direct link / GET download by analysisId param
-downloadRouter.get('/download/:analysisId', async (request, response, next) => {
+downloadRouter.get('/download/:analysisId', downloadRateLimiter, async (request, response, next) => {
   return handleDownload(request.params.analysisId, request, response, next)
 })
 
 // Support GET download by query parameter (?analysisId=...)
-downloadRouter.get('/download', async (request, response, next) => {
+downloadRouter.get('/download', downloadRateLimiter, async (request, response, next) => {
   return handleDownload(request.query.analysisId, request, response, next)
 })
 
 // Support POST download with body payload ({ analysisId })
-downloadRouter.post('/download', async (request, response, next) => {
+downloadRouter.post('/download', downloadRateLimiter, async (request, response, next) => {
   return handleDownload(request.body?.analysisId, request, response, next)
 })
 

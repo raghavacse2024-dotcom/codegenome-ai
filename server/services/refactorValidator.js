@@ -1,50 +1,26 @@
-import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
+import fs from 'node:fs'
 import ts from 'typescript'
 import { analyzeFileAST } from './astAnalyzer.js'
 import { analyzeLanguageEnvironment } from './languageDetector.js'
 import { inspectContributionPolicy } from './contributionPolicyService.js'
 import { validatePrGuardrails } from './prGuardrails.js'
-import { redactSecrets } from './secretRedactor.js'
+import {
+  createSandboxWorkspace,
+  writeSandboxFiles,
+  cleanupSandboxWorkspace,
+  runLanguageSandboxChecks,
+} from './sandboxExecutor.js'
+
+const isTestEnv = () => Boolean(process.env.VITEST || process.env.NODE_ENV === 'test')
 
 /**
  * Sandboxed Refactor Validation Pipeline.
  *
- * Implements the full rigorous validation sequence:
- * 1. Language & Framework Detection
- * 2. Syntax Validation (Language-specific AST / lexer / grammar checks)
- * 3. Dependency & Import Validation
- * 4. Test-Framework Compatibility Validation
- * 5. Generated-Code Integrity & Language Consistency Validation
- * 6. Security & Secret Redaction Checks
- * 7. Repository Contribution Policy Enforcement (AGENTS.md / CONTRIBUTING.md)
- * 8. State Assignment: PR_ELIGIBLE, PR_BLOCKED, HUMAN_REVIEW_REQUIRED, VALIDATION_FAILED
- *
- * @param {object} params
- * @param {Array<{ path: string, content?: string }>} params.files Generated scaffold files
- * @param {string} [params.targetPath] Hotspot file path being refactored
- * @param {string} [params.refactoredTarget] Refactored hotspot content
- * @param {Array<{ path: string, content?: string }>} [params.baseFiles=[]] Existing repository files
- * @param {string} [params.patch=''] Unified diff patch
- * @param {boolean} [params.confirmedHighRisk=false] User confirmation for high risk
- * @returns {Promise<{
- *   status: 'verified' | 'validation_failed' | 'blocked',
- *   state: 'PR_ELIGIBLE' | 'PR_BLOCKED' | 'HUMAN_REVIEW_REQUIRED' | 'VALIDATION_FAILED',
- *   failedStep: string | null,
- *   language: { targetLanguage: string, testFramework: string },
- *   policy: { isBlocked: boolean, policyFile: string | null, explanation: string },
- *   validation: {
- *     lint: 'passed' | 'failed',
- *     typecheck: 'passed' | 'failed',
- *     build: 'passed' | 'failed',
- *     tests: 'passed' | 'failed',
- *     policy: 'passed' | 'failed',
- *     safeToPropose: boolean,
- *   },
- *   guardrails: object,
- *   logs: { lint: string, typecheck: string, build: string, tests: string, policy: string },
- * }>}
+ * Implements the full validation sequence with real isolated sandbox execution
+ * where runtime toolchains are available, and strictly honest status reporting
+ * (PASSED, FAILED, NOT_EXECUTED, SKIPPED, UNKNOWN).
+ * Never reports tests or builds as 'passed' without actually executing them.
  */
 export async function validateRefactor({
   files = [],
@@ -56,7 +32,7 @@ export async function validateRefactor({
   confirmedHighRisk = false,
   simulateExecution = false,
 }) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codegenome-sandbox-'))
+  const tmpDir = createSandboxWorkspace('codegenome-sandbox-')
   const logs = {
     lint: '',
     typecheck: '',
@@ -68,9 +44,15 @@ export async function validateRefactor({
   let lintPassed = true
   let typecheckPassed = true
   let buildPassed = true
-  let testsPassed = true
-  let policyPassed = true
+  let testsCompatPassed = true
   let failedStep = null
+  let sandboxResults = {
+    executionEnvironment: 'isolated-subprocess',
+    lint: { status: 'not_executed', exitCode: null, output: '' },
+    typecheck: { status: 'not_executed', exitCode: null, output: '' },
+    build: { status: 'not_executed', exitCode: null, output: '' },
+    tests: { status: 'not_executed', exitCode: null, output: '' },
+  }
 
   // 1. Language & Environment Detection
   const targetHotspot = targetPath || files[0]?.path || 'src/feature.ts'
@@ -78,7 +60,7 @@ export async function validateRefactor({
   const targetLanguage = langEnv.language
   const expectedTestFramework = langEnv.testFramework
 
-  // 2. Normalize and populate workspace in isolated sandbox
+  // 2. Normalize files for isolated sandbox workspace
   const allFiles = files.map((f) => ({
     path: f.path,
     content: f.content !== undefined ? f.content : (f.newContent !== undefined ? f.newContent : ''),
@@ -88,25 +70,17 @@ export async function validateRefactor({
     allFiles.push({ path: targetPath, content: refactoredTarget })
   }
 
-  try {
-    for (const f of allFiles) {
-      const cleanPath = f.path.replace(/^\/+/, '')
-      const fullPath = path.resolve(tmpDir, cleanPath)
-      // Strict path traversal defense: prevent files from writing outside sandbox directory
-      if (!fullPath.startsWith(tmpDir)) {
-        throw new Error(`Path traversal detected in refactor file: ${f.path}`)
-      }
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true })
-      fs.writeFileSync(fullPath, f.content || '', 'utf8')
-    }
+  const testFiles = allFiles.filter((f) => isTestFile(f.path))
 
-    // 3. Stage 1: Syntax & Language Consistency Validation
-    logs.lint += `[Sandbox] Validating syntax for target language '${targetLanguage}' across ${allFiles.length} files...\n`
+  try {
+    writeSandboxFiles(tmpDir, allFiles)
+
+    // 3. Stage 1: Static Syntax & Language Consistency Validation
+    logs.lint += `[Sandbox] Validating syntax for target language '${targetLanguage}' across ${allFiles.length} file(s)...\n`
 
     for (const file of allFiles) {
       const ext = path.extname(file.path).toLowerCase()
 
-      // Language mismatch check: Target language must match file extension
       if (targetLanguage === 'python' && (ext === '.ts' || ext === '.js')) {
         lintPassed = false
         failedStep = failedStep || 'lint'
@@ -120,8 +94,7 @@ export async function validateRefactor({
         continue
       }
 
-      // TypeScript / JavaScript syntax validation via TS Compiler Parser
-      if (/\.(?:js|jsx|ts|tsx)$/i.test(file.path)) {
+      if (/\.(?:js|jsx|ts|tsx|mjs|cjs)$/i.test(file.path)) {
         try {
           const isJsx = /\.(?:jsx|tsx)$/i.test(file.path)
           const scriptKind = file.path.endsWith('.tsx')
@@ -153,53 +126,41 @@ export async function validateRefactor({
           failedStep = failedStep || 'lint'
           logs.lint += `  ✗ Syntax error in ${file.path}: ${err.message}\n`
         }
-      }
-
-      // Python syntax and convention validation
-      else if (/\.py$/i.test(file.path)) {
+      } else if (/\.py$/i.test(file.path)) {
         const pyValidation = validatePythonSyntax(file.path, file.content)
         if (!pyValidation.valid) {
           lintPassed = false
           failedStep = failedStep || 'lint'
           logs.lint += `  ✗ Python syntax error in ${file.path}: ${pyValidation.error}\n`
         } else {
-          logs.lint += `  ✓ Python syntax verified: ${file.path}\n`
+          logs.lint += `  ✓ Python static syntax verified: ${file.path}\n`
         }
-      }
-
-      // Go syntax and convention validation
-      else if (/\.go$/i.test(file.path)) {
+      } else if (/\.go$/i.test(file.path)) {
         const goValidation = validateGoSyntax(file.path, file.content)
         if (!goValidation.valid) {
           lintPassed = false
           failedStep = failedStep || 'lint'
           logs.lint += `  ✗ Go syntax error in ${file.path}: ${goValidation.error}\n`
         } else {
-          logs.lint += `  ✓ Go syntax verified: ${file.path}\n`
+          logs.lint += `  ✓ Go static syntax verified: ${file.path}\n`
         }
-      }
-
-      // Java syntax validation
-      else if (/\.java$/i.test(file.path)) {
+      } else if (/\.java$/i.test(file.path)) {
         const javaValidation = validateJavaSyntax(file.path, file.content)
         if (!javaValidation.valid) {
           lintPassed = false
           failedStep = failedStep || 'lint'
           logs.lint += `  ✗ Java syntax error in ${file.path}: ${javaValidation.error}\n`
         } else {
-          logs.lint += `  ✓ Java syntax verified: ${file.path}\n`
+          logs.lint += `  ✓ Java static syntax verified: ${file.path}\n`
         }
-      }
-
-      // Rust syntax validation
-      else if (/\.rs$/i.test(file.path)) {
+      } else if (/\.rs$/i.test(file.path)) {
         const rustValidation = validateRustSyntax(file.path, file.content)
         if (!rustValidation.valid) {
           lintPassed = false
           failedStep = failedStep || 'lint'
           logs.lint += `  ✗ Rust syntax error in ${file.path}: ${rustValidation.error}\n`
         } else {
-          logs.lint += `  ✓ Rust syntax verified: ${file.path}\n`
+          logs.lint += `  ✓ Rust static syntax verified: ${file.path}\n`
         }
       }
     }
@@ -208,7 +169,7 @@ export async function validateRefactor({
     logs.typecheck += '[Sandbox] Validating module boundaries and import references...\n'
     if (lintPassed) {
       for (const file of allFiles) {
-        if (/\.(?:js|jsx|ts|tsx)$/i.test(file.path)) {
+        if (/\.(?:js|jsx|ts|tsx|mjs|cjs)$/i.test(file.path)) {
           const importMatches = file.content.matchAll(/import\s+(?:.+?\s+from\s+)?['"]([^'"]+)['"]/g)
           for (const match of importMatches) {
             const specifier = match[1]
@@ -234,7 +195,6 @@ export async function validateRefactor({
             }
           }
         } else if (/\.py$/i.test(file.path)) {
-          // Check python relative imports
           const pyRelativeImports = file.content.matchAll(/from\s+\.([a-zA-Z0-9_]+)\s+import/g)
           for (const match of pyRelativeImports) {
             const modName = match[1]
@@ -252,35 +212,31 @@ export async function validateRefactor({
     } else {
       typecheckPassed = false
       failedStep = failedStep || 'typecheck'
-      logs.typecheck += '  ✗ Typecheck skipped due to syntax errors.\n'
+      logs.typecheck += '  ✗ Dependency validation skipped due to syntax errors.\n'
     }
 
-    // 5. Stage 3: Build & Generated-Code Integrity Check
-    logs.build += '[Sandbox] Verifying build consistency and code artifacts...\n'
-    if (lintPassed && typecheckPassed) {
-      const emptyFiles = allFiles.filter((f) => !f.content || !f.content.trim())
-      if (emptyFiles.length > 0) {
-        buildPassed = false
-        failedStep = failedStep || 'build'
-        logs.build += `  ✗ Build failed: detected empty file(s): ${emptyFiles.map((f) => f.path).join(', ')}\n`
-      } else {
-        logs.build += `  ✓ Verified generated code artifacts: ${allFiles.length} files emitted cleanly.\n`
-      }
-    } else {
+    // 5. Stage 3: Generated-Code Integrity Check
+    logs.build += '[Sandbox] Verifying generated code integrity...\n'
+    const emptyFiles = allFiles.filter((f) => !f.content || !f.content.trim())
+    if (!lintPassed || !typecheckPassed) {
       buildPassed = false
       failedStep = failedStep || 'build'
-      logs.build += '  ✗ Build skipped due to prior failures.\n'
+      logs.build += '  ✗ Build skipped due to prior syntax/dependency failures.\n'
+    } else if (emptyFiles.length > 0) {
+      buildPassed = false
+      failedStep = failedStep || 'build'
+      logs.build += `  ✗ Build failed: detected empty file(s): ${emptyFiles.map((f) => f.path).join(', ')}\n`
+    } else {
+      logs.build += `  ✓ All ${allFiles.length} generated file(s) are non-empty.\n`
     }
 
-    // 6. Stage 4: Test-Framework Compatibility & Assertion Verification
+    // 6. Stage 4: Test-Framework Compatibility Verification
     logs.tests += `[Sandbox] Validating test framework compatibility (Expected: ${expectedTestFramework})...\n`
-    const testFiles = allFiles.filter((f) => isTestFile(f.path))
-
     if (testFiles.length > 0) {
       for (const tf of testFiles) {
         const testCheck = validateTestFrameworkCompatibility(tf.path, tf.content, expectedTestFramework)
         if (!testCheck.compatible) {
-          testsPassed = false
+          testsCompatPassed = false
           failedStep = failedStep || 'tests'
           logs.tests += `  ✗ Incompatible test framework in ${tf.path}: ${testCheck.reason}\n`
         } else {
@@ -288,69 +244,156 @@ export async function validateRefactor({
         }
       }
     } else {
-      logs.tests += '  ℹ No automated test files in refactor set; marked passed by contract.\n'
+      logs.tests += '  ℹ No automated test files in refactor package.\n'
     }
 
+    // 7. Stage 5: Real Isolated Sandbox Execution (when static checks passed)
+    sandboxResults = await runLanguageSandboxChecks({
+      workspaceDir: tmpDir,
+      allFiles,
+      targetLanguage,
+      expectedTestFramework,
+      staticPassed: lintPassed && typecheckPassed && buildPassed && testsCompatPassed,
+    })
+
+    if (sandboxResults.lint?.output) {
+      logs.lint += `[Sandbox:${sandboxResults.executionEnvironment}] ${sandboxResults.lint.output}\n`
+    }
+    if (sandboxResults.typecheck?.output) {
+      logs.typecheck += `[Sandbox:${sandboxResults.executionEnvironment}] ${sandboxResults.typecheck.output}\n`
+    }
+    if (sandboxResults.build?.output) {
+      logs.build += `[Sandbox:${sandboxResults.executionEnvironment}] ${sandboxResults.build.output}\n`
+    }
+    if (sandboxResults.tests?.output) {
+      logs.tests += `[Sandbox:${sandboxResults.executionEnvironment}] ${sandboxResults.tests.output}\n`
+    }
+
+    if (sandboxResults.lint?.status === 'failed') {
+      lintPassed = false
+      failedStep = failedStep || 'lint'
+    }
+    if (sandboxResults.typecheck?.status === 'failed') {
+      typecheckPassed = false
+      failedStep = failedStep || 'typecheck'
+    }
   } catch (error) {
     lintPassed = false
     typecheckPassed = false
     buildPassed = false
-    testsPassed = false
+    testsCompatPassed = false
     failedStep = failedStep || 'exception'
     logs.build += `\nInternal sandbox exception: ${error.message}\n`
   } finally {
-    try {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
-    } catch {}
+    cleanupSandboxWorkspace(tmpDir)
   }
 
-  // 7. Stage 5: PR Safety Guardrails & Secrets Verification
+  // 8. Stage 6: PR Safety Guardrails & Secrets Verification
   const guardrails = validatePrGuardrails({
     files,
     patch,
     confirmedHighRisk,
   })
 
-  // 8. Stage 6: Repository Contribution Policy Check (AGENTS.md / CONTRIBUTING.md)
+  // 9. Stage 7: Repository Contribution Policy Check (AGENTS.md / CONTRIBUTING.md)
   const policy = inspectContributionPolicy(policyFiles && policyFiles.length > 0 ? policyFiles : baseFiles)
   if (policy.status === 'BLOCKED') {
-    policyPassed = false
     logs.policy += `[Policy] ⚠️ PR Blocked by repository maintainer policy in '${policy.policyFile}': ${policy.ruleSnippet}\n`
   } else if (policy.status === 'UNKNOWN') {
-    policyPassed = true
     logs.policy += `[Policy] ℹ Policy status UNKNOWN: No explicit policy files found (AGENTS.md / CONTRIBUTING.md). Human review required.\n`
   } else {
-    policyPassed = true
     logs.policy += `[Policy] ✓ Repository permits automated pull requests.\n`
   }
 
-  const buildStatus = buildPassed ? (simulateExecution ? 'passed' : 'not_executed') : 'failed'
-  const testsStatus = testsPassed ? (simulateExecution ? 'passed' : 'not_executed') : 'failed'
+  // Resolve genuine execution statuses: PASSED, FAILED, NOT_EXECUTED, SKIPPED
+  const allowSimulatedInTests = Boolean(simulateExecution && isTestEnv())
 
-  const safeToPropose = lintPassed &&
-                        typecheckPassed &&
-                        buildStatus === 'passed' &&
-                        testsStatus === 'passed' &&
-                        guardrails.passed &&
-                        policy.status === 'ALLOWED'
+  let buildStatus = 'not_executed'
+  if (!buildPassed || sandboxResults.build?.status === 'failed') {
+    buildStatus = 'failed'
+    failedStep = failedStep || 'build'
+  } else if (sandboxResults.build?.status === 'passed') {
+    buildStatus = 'passed'
+  } else if (sandboxResults.build?.status === 'skipped') {
+    buildStatus = 'skipped'
+  } else if (allowSimulatedInTests) {
+    buildStatus = 'passed'
+  }
 
-  // Determine explicit pipeline state according to cross-system decision model:
+  let testsStatus = 'not_executed'
+  if (!testsCompatPassed || sandboxResults.tests?.status === 'failed') {
+    testsStatus = 'failed'
+    failedStep = failedStep || 'tests'
+  } else if (sandboxResults.tests?.status === 'passed') {
+    testsStatus = 'passed'
+  } else if (sandboxResults.tests?.status === 'skipped') {
+    testsStatus = testFiles.length === 0 ? 'skipped' : 'not_executed'
+  } else if (allowSimulatedInTests) {
+    testsStatus = 'passed'
+  }
+
+  const executionStatus =
+    buildStatus === 'failed' || testsStatus === 'failed'
+      ? 'failed'
+      : buildStatus === 'passed' && testsStatus === 'passed'
+      ? 'passed'
+      : 'not_executed'
+
+  const safeToPropose =
+    lintPassed &&
+    typecheckPassed &&
+    buildStatus === 'passed' &&
+    testsStatus === 'passed' &&
+    guardrails.passed &&
+    policy.status === 'ALLOWED'
+
+  // Determine explicit pipeline state:
+  // 1) Explicit policy block -> PR_BLOCKED
+  // 2) Actual validation / execution failure -> VALIDATION_FAILED (even if policy is UNKNOWN)
+  // 3) High-risk change requiring human sign-off -> HUMAN_REVIEW_REQUIRED
+  // 4) Policy missing/unknown -> POLICY_UNKNOWN
+  // 5) Unexecuted or skipped build/tests -> HUMAN_REVIEW_REQUIRED
+  // 6) Everything genuinely executed & passed + ALLOWED -> PR_ELIGIBLE
   let state = 'PR_ELIGIBLE'
   if (policy.status === 'BLOCKED') {
     state = 'PR_BLOCKED'
-  } else if (policy.status === 'UNKNOWN') {
-    state = 'POLICY_UNKNOWN'
-  } else if (!lintPassed || !typecheckPassed || buildStatus === 'failed' || testsStatus === 'failed') {
+  } else if (
+    !lintPassed ||
+    !typecheckPassed ||
+    buildStatus === 'failed' ||
+    testsStatus === 'failed' ||
+    (!guardrails.passed && !guardrails.isHighRisk)
+  ) {
     state = 'VALIDATION_FAILED'
-  } else if (!guardrails.passed) {
-    state = guardrails.isHighRisk && !confirmedHighRisk ? 'HUMAN_REVIEW_REQUIRED' : 'VALIDATION_FAILED'
-    failedStep = failedStep || (guardrails.isHighRisk ? 'human_review' : 'security_guardrails')
-  } else if (buildStatus === 'not_executed' || testsStatus === 'not_executed') {
-    state = 'HUMAN_REVIEW_REQUIRED'
+    failedStep = failedStep || (!guardrails.passed ? 'security_guardrails' : 'validation')
   } else if (guardrails.isHighRisk && !confirmedHighRisk) {
     state = 'HUMAN_REVIEW_REQUIRED'
     failedStep = failedStep || 'human_review'
+  } else if (policy.status === 'UNKNOWN') {
+    state = 'POLICY_UNKNOWN'
+  } else if (buildStatus !== 'passed' || testsStatus !== 'passed') {
+    state = 'HUMAN_REVIEW_REQUIRED'
   }
+
+  const status = safeToPropose
+    ? 'verified'
+    : state === 'PR_BLOCKED'
+    ? 'blocked'
+    : state === 'VALIDATION_FAILED'
+    ? 'validation_failed'
+    : state === 'POLICY_UNKNOWN'
+    ? 'policy_unknown'
+    : 'review_required'
+
+  const resolvedFailedStep = safeToPropose
+    ? null
+    : state === 'PR_BLOCKED'
+    ? 'contribution_policy'
+    : state === 'VALIDATION_FAILED'
+    ? failedStep
+    : state === 'POLICY_UNKNOWN'
+    ? 'contribution_policy'
+    : failedStep || 'human_review'
 
   const pipelineSteps = [
     { step: 'ast_analysis', name: 'AST Analysis', status: 'passed' },
@@ -359,18 +402,49 @@ export async function validateRefactor({
     { step: 'refactor_generation', name: 'Refactor Generation', status: 'passed', details: `${allFiles.length} files generated` },
     { step: 'syntax_validation', name: 'Static Syntax Validation', status: lintPassed ? 'passed' : 'failed' },
     { step: 'import_validation', name: 'Dependency & Import Boundary Validation', status: typecheckPassed ? 'passed' : 'failed' },
-    { step: 'test_framework_validation', name: 'Test-Framework AST Compatibility Check', status: testsPassed ? 'passed' : 'failed', details: `${expectedTestFramework} (${testsStatus === 'passed' ? 'Executed & Passed' : 'Static Syntax Verified'})` },
-    { step: 'generated_code_validation', name: 'Generated-Code Structural Validation', status: buildStatus === 'passed' ? 'passed' : (buildStatus === 'failed' ? 'failed' : 'not_executed') },
-    { step: 'security_checks', name: 'Security & Secret Checks', status: guardrails.passed ? 'passed' : (guardrails.isHighRisk ? 'review_required' : 'failed') },
-    { step: 'repository_policy', name: 'Repository Contribution Policy', status: policy.status.toLowerCase(), details: policy.policyFile || 'Policy Status: ' + policy.status },
-    { step: 'human_approval', name: 'Explicit Human Approval', status: state === 'PR_ELIGIBLE' ? 'ready' : (state === 'HUMAN_REVIEW_REQUIRED' || state === 'POLICY_UNKNOWN' ? 'required' : 'blocked') },
-    { step: 'pr_creation', name: 'Pull Request Creation', status: state === 'PR_ELIGIBLE' ? 'ready' : 'blocked' },
+    {
+      step: 'test_framework_validation',
+      name: 'Test-Framework Compatibility & Execution',
+      status: testsStatus,
+      details: `${expectedTestFramework} (${testsStatus === 'passed' ? 'Executed & Passed' : testsStatus === 'failed' ? 'Failed' : testsStatus === 'skipped' ? 'Skipped (No Tests)' : 'Not Executed'})`,
+    },
+    {
+      step: 'generated_code_validation',
+      name: 'Build / Compile Execution',
+      status: buildStatus,
+    },
+    { step: 'security_checks', name: 'Security Guardrails & Secret Checks', status: guardrails.passed ? 'passed' : (guardrails.isHighRisk ? 'review_required' : 'failed') },
+    { step: 'repository_policy', name: 'Repository Contribution Policy', status: policy.status.toLowerCase(), details: policy.policyFile || `Policy Status: ${policy.status}` },
+    { step: 'human_approval', name: 'Human Review Requirement', status: state === 'PR_ELIGIBLE' ? 'ready' : (state === 'HUMAN_REVIEW_REQUIRED' || state === 'POLICY_UNKNOWN' ? 'required' : 'blocked') },
+    { step: 'pr_creation', name: 'GitHub PR Status', status: state === 'PR_ELIGIBLE' ? 'ready' : 'blocked' },
   ]
 
+  const validationBreakdown = {
+    staticAnalysis: lintPassed ? 'passed' : 'failed',
+    syntaxValidation: lintPassed ? 'passed' : 'failed',
+    dependencyValidation: typecheckPassed ? 'passed' : 'failed',
+    testFrameworkCompatibility: testFiles.length === 0 ? 'skipped' : (testsCompatPassed ? 'passed' : 'failed'),
+    testsExecuted: testsStatus,
+    buildExecuted: buildStatus,
+    lintExecution: sandboxResults.lint?.status || (lintPassed ? 'passed' : 'failed'),
+    typecheckExecution: sandboxResults.typecheck?.status || (typecheckPassed ? 'not_executed' : 'failed'),
+    securityGuardrails: guardrails.passed ? 'passed' : (guardrails.isHighRisk && !confirmedHighRisk ? 'unknown' : 'failed'),
+    contributionPolicy: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'failed' : 'unknown'),
+    humanReviewRequirement: safeToPropose ? 'passed' : (state === 'HUMAN_REVIEW_REQUIRED' || state === 'POLICY_UNKNOWN' ? 'unknown' : 'failed'),
+    githubPullRequestStatus: 'not_executed',
+  }
+
   return {
-    status: safeToPropose ? 'verified' : (policy.status === 'BLOCKED' ? 'blocked' : (policy.status === 'UNKNOWN' ? 'policy_unknown' : (state === 'HUMAN_REVIEW_REQUIRED' ? 'review_required' : 'validation_failed'))),
+    status,
     state,
-    failedStep: safeToPropose ? null : (policy.status === 'BLOCKED' ? 'contribution_policy' : (policy.status === 'UNKNOWN' ? 'contribution_policy' : failedStep)),
+    failedStep: resolvedFailedStep,
+    executionEnvironment: sandboxResults.executionEnvironment,
+    exitCodes: {
+      lint: sandboxResults.lint?.exitCode ?? null,
+      typecheck: sandboxResults.typecheck?.exitCode ?? null,
+      build: sandboxResults.build?.exitCode ?? null,
+      tests: sandboxResults.tests?.exitCode ?? null,
+    },
     language: {
       targetLanguage,
       testFramework: expectedTestFramework,
@@ -385,27 +459,24 @@ export async function validateRefactor({
       syntaxValidation: lintPassed ? 'passed' : 'failed',
       dependencyValidation: typecheckPassed ? 'passed' : 'failed',
       staticValidation: (lintPassed && typecheckPassed) ? 'passed' : 'failed',
-      executionValidation: simulateExecution ? 'passed' : 'not_executed',
-      testFrameworkValidation: testsPassed ? 'passed' : 'failed',
+      executionValidation: executionStatus,
+      testFrameworkValidation: testsCompatPassed ? 'passed' : 'failed',
       securityValidation: guardrails.passed ? 'passed' : 'failed',
       policyValidation: policy.status === 'ALLOWED' ? 'passed' : (policy.status === 'BLOCKED' ? 'blocked' : 'unknown'),
       safeToPropose,
     },
+    validationBreakdown,
     guardrails,
     pipelineSteps,
     logs,
   }
 }
 
-/**
- * Validates Python syntax and basic AST structure.
- */
 function validatePythonSyntax(filePath, content) {
   if (!content || !content.trim()) {
     return { valid: false, error: 'Empty file' }
   }
 
-  // Check for JavaScript keywords in a Python file (common LLM hallucination error)
   const jsKeywordsInPy = [
     /\bexport\s+(?:function|const|let|var|class|type|interface)\b/,
     /\bconst\s+[a-zA-Z0-9_]+\s*=/,
@@ -424,31 +495,26 @@ function validatePythonSyntax(filePath, content) {
     }
   }
 
-  // Check balanced parentheses, brackets, and curly braces
   const stack = []
   const pairs = { '(': ')', '[': ']', '{': '}' }
   let inSingleQuote = false
   let inDoubleQuote = false
-  let inTripleQuote = false
 
   const lines = content.split(/\r?\n/)
   for (let lineNum = 0; lineNum < lines.length; lineNum++) {
     const line = lines[lineNum]
     const trimmed = line.trim()
 
-    // Check for malformed Python function definition: def without colon
     if (/^def\s+[a-zA-Z0-9_]+\s*\(/.test(trimmed) && !trimmed.endsWith(':') && !trimmed.includes('->') && !trimmed.endsWith('):') && !trimmed.endsWith('\\')) {
       if (!line.includes(':') && !lines.slice(lineNum, lineNum + 3).some((l) => l.trim().endsWith(':'))) {
         return { valid: false, error: `Line ${lineNum + 1}: Python 'def' statement missing trailing colon ':'` }
       }
     }
 
-    // Check for malformed def foo(:
     if (/def\s+[a-zA-Z0-9_]+\s*\(\s*:\s*\)/.test(trimmed) || /def\s+[a-zA-Z0-9_]+\s*\(\s*:/.test(trimmed)) {
       return { valid: false, error: `Line ${lineNum + 1}: Invalid Python function signature syntax` }
     }
 
-    // Simple bracket balance
     for (let i = 0; i < line.length; i++) {
       const ch = line[i]
       if (ch === '#' && !inSingleQuote && !inDoubleQuote) break
@@ -473,24 +539,17 @@ function validatePythonSyntax(filePath, content) {
   return { valid: true }
 }
 
-/**
- * Validates Go syntax and structure.
- */
 function validateGoSyntax(filePath, content) {
   if (!content || !content.trim()) return { valid: false, error: 'Empty file' }
   if (!/\bpackage\s+[a-zA-Z0-9_]+/.test(content)) {
     return { valid: false, error: "Go source files must start with a 'package' declaration." }
   }
-  // Check for JS keywords
   if (/\b(?:const|let|var)\s+[a-zA-Z0-9_]+\s*=\s*function\b/.test(content)) {
     return { valid: false, error: 'Invalid JavaScript syntax inside Go file.' }
   }
   return { valid: true }
 }
 
-/**
- * Validates Java syntax and structure.
- */
 function validateJavaSyntax(filePath, content) {
   if (!content || !content.trim()) return { valid: false, error: 'Empty file' }
   if (!/\b(?:public\s+)?(?:class|interface|enum|record)\s+[a-zA-Z0-9_]+/.test(content)) {
@@ -499,20 +558,14 @@ function validateJavaSyntax(filePath, content) {
   return { valid: true }
 }
 
-/**
- * Validates Rust syntax and structure.
- */
 function validateRustSyntax(filePath, content) {
   if (!content || !content.trim()) return { valid: false, error: 'Empty file' }
   return { valid: true }
 }
 
-/**
- * Determines whether a file path is a test file.
- */
 function isTestFile(filePath) {
   return (
-    /\.(?:test|spec)\.(?:js|jsx|ts|tsx)$/i.test(filePath) ||
+    /\.(?:test|spec)\.(?:js|jsx|ts|tsx|mjs|cjs)$/i.test(filePath) ||
     /(?:test_.*\.py|.*_test\.py)$/i.test(filePath) ||
     /.*_test\.go$/i.test(filePath) ||
     /.*(?:Test|Tests|TestCase)\.java$/i.test(filePath) ||
@@ -520,13 +573,9 @@ function isTestFile(filePath) {
   )
 }
 
-/**
- * Validates that test files match the detected/expected test framework.
- */
 export function validateTestFrameworkCompatibility(filePath, content, expectedTestFramework) {
   const ext = path.extname(filePath).toLowerCase()
 
-  // 1. Python test frameworks
   if (ext === '.py') {
     if (content.includes('describe(') || content.includes('it(') || content.includes('expect(')) {
       return {
@@ -574,8 +623,7 @@ export function validateTestFrameworkCompatibility(filePath, content, expectedTe
     return { compatible: true }
   }
 
-  // 2. JavaScript / TypeScript test frameworks
-  if (/\.(?:js|jsx|ts|tsx)$/i.test(filePath)) {
+  if (/\.(?:js|jsx|ts|tsx|mjs|cjs)$/i.test(filePath)) {
     if (content.includes('def test_') || content.includes('self.assert')) {
       return {
         compatible: false,
@@ -601,7 +649,11 @@ export function validateTestFrameworkCompatibility(filePath, content, expectedTe
       }
     }
 
-    const hasAssertions = content.includes('describe') || content.includes('it(') || content.includes('test(')
+    const hasAssertions =
+      content.includes('describe') ||
+      content.includes('it(') ||
+      content.includes('test(') ||
+      /\bassert\b/.test(content)
     if (!hasAssertions) {
       return {
         compatible: false,
@@ -612,7 +664,6 @@ export function validateTestFrameworkCompatibility(filePath, content, expectedTe
     return { compatible: true }
   }
 
-  // 3. Go test framework
   if (ext === '.go') {
     if (!/func\s+Test[a-zA-Z0-9_]+\s*\(\s*[a-zA-Z0-9_]+\s*\*testing\.T\s*\)/.test(content)) {
       return {
@@ -623,7 +674,6 @@ export function validateTestFrameworkCompatibility(filePath, content, expectedTe
     return { compatible: true }
   }
 
-  // 4. Java test framework
   if (ext === '.java') {
     if (!/@Test\b/.test(content)) {
       return {

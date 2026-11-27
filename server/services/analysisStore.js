@@ -78,7 +78,27 @@ export async function saveAnalysis(analysis, userId = null) {
     const db = getServerFirestore()
     if (db) {
       const docRef = db.collection('analyses').doc(analysisId)
-      const firestoreData = prepareForFirestore(record)
+      let firestorePayload = record
+      const approxBytes = Buffer.byteLength(JSON.stringify(record), 'utf8')
+      if (approxBytes > 800_000) {
+        // Keep full indexed chunks/files in memory, store compact paths+metadata in Firestore to respect 1MB limit
+        firestorePayload = {
+          ...record,
+          files: (record.files || []).slice(0, 60).map((f) => ({
+            path: f.path,
+            size: f.size,
+            content: typeof f.content === 'string' ? f.content.slice(0, 3000) : '',
+          })),
+          repoIndex: record.repoIndex
+            ? {
+                projectInfo: record.repoIndex.projectInfo,
+                files: (record.repoIndex.files || []).slice(0, 100),
+                chunks: (record.repoIndex.chunks || []).slice(0, 80),
+              }
+            : null,
+        }
+      }
+      const firestoreData = prepareForFirestore(firestorePayload)
       await docRef.set(firestoreData)
       console.log(`[Firestore] Successfully persisted analysis ${analysisId} for ${analysis.repo?.owner}/${analysis.repo?.repository}`)
     }

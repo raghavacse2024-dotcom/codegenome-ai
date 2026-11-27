@@ -17,8 +17,57 @@ const app = express()
 const port = Number(process.env.PORT || 3000)
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-app.use(cors())
-app.use(express.json({ limit: '10kb' }))
+export function isAllowedOrigin(origin) {
+  if (!origin) return true // Same-origin / server-to-server requests without Origin header
+  try {
+    const parsed = new URL(origin)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+    const host = parsed.hostname.toLowerCase()
+
+    const configured = [
+      process.env.APP_URL,
+      process.env.FRONTEND_URL,
+      ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : []),
+    ]
+      .map((v) => v?.trim())
+      .filter(Boolean)
+
+    for (const item of configured) {
+      try {
+        if (new URL(item).origin === parsed.origin) return true
+      } catch {}
+    }
+
+    if (host === 'localhost' || host === '127.0.0.1') return true
+    if (host.endsWith('.vercel.app') || host.endsWith('.run.app')) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN')
+  next()
+})
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true)
+      } else {
+        callback(Object.assign(new Error('Origin not allowed by CORS policy'), { status: 403 }))
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-GitHub-Token'],
+  })
+)
+app.use(express.json({ limit: '64kb' }))
 app.use(requestLogger)
 
 app.use('/api', healthRouter)

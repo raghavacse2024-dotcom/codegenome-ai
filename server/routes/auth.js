@@ -1,8 +1,10 @@
 import { Router } from 'express'
 import { sessionStore } from '../services/sessionStore.js'
 import { resolveAuthenticatedUser } from '../services/authResolver.js'
+import { authRateLimiter } from '../middleware/rateLimiter.js'
 
 export const authRouter = Router()
+authRouter.use('/auth', authRateLimiter)
 
 export function getStoredToken(sessionId) {
   if (!sessionId) return null
@@ -41,9 +43,22 @@ export function clearStoredToken(sessionId) {
 
 function getAppUrl(req) {
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, '')
-  const origin = req.headers.origin || (req.headers.referer ? new URL(req.headers.referer).origin : null)
-  if (origin) return origin.replace(/\/$/, '')
-  return 'https://ais-dev-vff3qzdhjtyajqsbnmdwz2-5909266946.asia-southeast1.run.app'
+  const rawOrigin = req.headers.origin || req.headers.referer
+  if (rawOrigin) {
+    try {
+      const parsed = new URL(rawOrigin)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return parsed.origin.replace(/\/$/, '')
+      }
+    } catch {}
+  }
+  const host = req.get?.('host')
+  if (host && /^[a-zA-Z0-9.-]+(:\d+)?$/.test(host)) {
+    const proto = req.headers['x-forwarded-proto'] === 'https' || req.secure ? 'https' : 'http'
+    return `${proto}://${host}`
+  }
+  const port = Number(process.env.PORT || 3000)
+  return `http://localhost:${port}`
 }
 
 /**

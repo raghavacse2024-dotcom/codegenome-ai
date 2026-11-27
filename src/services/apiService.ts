@@ -104,9 +104,10 @@ async function request<T>(path: string, init: RequestInit, timeoutMs = 60_000): 
 }
 
 /**
- * Client-side fallback analysis generator ensuring zero "Failed to fetch" system errors.
+ * Explicit offline synthetic demo sample generator (only invoked when the user explicitly requests a demo sample).
+ * Never used to silently mask backend errors.
  */
-function createClientFallbackAnalysis(repositoryUrl: string): Analysis {
+export function createClientFallbackAnalysis(repositoryUrl: string, reason = 'User-requested offline demo sample'): Analysis {
   let owner = 'owner'
   let repository = 'repository'
   try {
@@ -125,82 +126,96 @@ function createClientFallbackAnalysis(repositoryUrl: string): Analysis {
       owner,
       repository,
       url: repositoryUrl,
-      description: 'CodeGenome AI Client Telemetry Fallback (Ensuring continuous analysis output).',
-      stars: 42,
+      description: 'Synthetic demo fallback sample (live GitHub source files were not fetched).',
+      stars: 0,
       defaultBranch: 'main'
     },
-    source: 'demo-safe',
+    source: 'demo',
     isDemo: true,
+    isFallback: true,
+    fallbackReason: reason,
     mode: 'demo',
+    metadata: {
+      analyzedFileCount: 0,
+      repositoryFileCount: 0,
+      samplingUsed: false,
+      completeness: 'unavailable',
+      analysisCoverage: '0%',
+      samplingNotice: `Synthetic demo fallback (${reason}). Live repository files were not fetched.`
+    },
     events: [
-      { agent: 'Ingestion', status: 'complete', rationale: `Sampled repository ${owner}/${repository} successfully via resilient analysis pipeline.`, at: new Date().toISOString() },
-      { agent: 'Architecture', status: 'complete', rationale: 'Mapped module hierarchy and entrypoint dependencies.', at: new Date().toISOString() },
-      { agent: 'Technical Debt', status: 'complete', rationale: 'Calculated cyclomatic complexity and maintenance debt index.', at: new Date().toISOString() },
-      { agent: 'Risk & Cost', status: 'complete', rationale: 'Evaluated bug propagation probability and developer hour valuation.', at: new Date().toISOString() },
-      { agent: 'Refactor Planner', status: 'complete', rationale: 'Generated modular TypeScript refactoring scaffolds.', at: new Date().toISOString() },
-      { agent: 'Review', status: 'complete', rationale: 'Verified AST compliance and zero regression constraints.', at: new Date().toISOString() }
+      { agent: 'Ingestion', status: 'complete', rationale: `Loaded synthetic demo shell for ${owner}/${repository} (${reason}).`, at: new Date().toISOString() },
+      { agent: 'Architecture', status: 'complete', rationale: 'Loaded illustrative architectural baseline.', at: new Date().toISOString() },
+      { agent: 'Technical Debt', status: 'complete', rationale: 'Loaded illustrative complexity baseline.', at: new Date().toISOString() },
+      { agent: 'Risk & Cost', status: 'complete', rationale: 'Loaded illustrative impact estimate.', at: new Date().toISOString() },
+      { agent: 'Refactor Planner', status: 'complete', rationale: 'Generated illustrative refactoring scaffold.', at: new Date().toISOString() },
+      { agent: 'Review', status: 'complete', rationale: 'Marked human review required (synthetic fallback).', at: new Date().toISOString() }
     ],
     results: {
       architecture: {
         data: {
-          framework: 'TypeScript / React / Node.js',
-          layers: ['Client UI', 'API Gateway', 'Multi-Agent Mesh', 'Persistence Layer'],
-          violations: ['Circular dependency detected in core utility modules'],
-          summary: 'Clean component structure with well-defined separation of concerns across service layers.',
+          framework: 'Demo Sample',
+          layers: ['Client UI', 'API Gateway', 'Multi-Agent Mesh'],
+          violations: [],
+          summary: 'Synthetic demo fallback: connect live backend & GitHub access for real repository analysis.',
           structure: {
-            sampledFileCount: 6,
-            rootDirectories: ['src', 'server', 'tests'],
-            languages: [['TypeScript', 70], ['JavaScript', 30]],
-            entryPoints: ['src/App.tsx', 'server/index.js']
+            sampledFileCount: 0,
+            rootDirectories: ['src'],
+            languages: [['TypeScript', 1]],
+            entryPoints: []
           }
         }
       },
       debt: {
         data: {
-          hotspots: [
-            { path: 'server/github.js', lines: 174, score: 72, signals: ['High cyclomatic complexity', 'Error handling fallback duplication'] },
-            { path: 'src/services/apiService.ts', lines: 318, score: 65, signals: ['Mixed async error states'] }
-          ],
-          totalDebtScore: 78,
-          summary: 'Moderate technical debt centered around ingestion error recovery and async request retries.'
+          hotspots: [],
+          totalDebtScore: 0,
+          summary: 'No real repository files indexed in synthetic demo fallback.'
         }
       },
       cost: {
         data: {
-          annualCost: 14200,
-          priority: 'Medium',
-          roiMonths: 3,
-          assumption: 'Based on 45 hours of engineering refactor effort at $95/hr.'
+          annualCost: 0,
+          priority: 'Low',
+          roiMonths: 1,
+          assumption: 'Synthetic offline demo estimate — no repository files executed or parsed.'
         }
       },
       refactor: {
         data: {
-          target: 'server/github.js',
+          target: 'src/sample.ts',
           steps: [
-            'Extract GitHub fetch error handlers into dedicated utility modules.',
-            'Add robust automatic fallback caching for API rate-limits.',
-            'Refactor TypeScript interfaces for strict null safety.'
+            'Retry analysis against the live backend once connectivity is restored.'
           ],
           scaffolds: [
             {
-              path: 'server/github.fallback.js',
-              content: `export async function fetchRepositorySafe(url) {\n  try {\n    return await fetchRepository(url)\n  } catch (err) {\n    return createDemoRepository(url, err.message)\n  }\n}`
+              path: 'src/sample.ts',
+              content: `export function sampleReady() {\n  return { status: 'demo' };\n}\n`
             }
           ],
-          refactoredTarget: `// Refactored and optimized module with robust fallback handling\nexport async function fetchRepositorySafe(url) {\n  try {\n    return await fetchRepository(url)\n  } catch (err) {\n    console.warn('Fallback activated:', err.message)\n    return createDemoRepository(url)\n  }\n}`,
-          pullRequestTitle: 'refactor: modularize GitHub ingestion and strengthen network fallbacks'
+          refactoredTarget: '',
+          pullRequestTitle: 'chore: synthetic demo sample (not verified against live repository)',
+          state: 'HUMAN_REVIEW_REQUIRED',
+          validation: {
+            tests: 'not_executed',
+            lint: 'not_executed',
+            typecheck: 'not_executed',
+            build: 'not_executed',
+            policy: 'unknown',
+            safeToPropose: false
+          }
         }
       },
       review: {
         data: {
-          verdict: 'APPROVED',
+          verdict: 'Human Review Required',
+          state: 'HUMAN_REVIEW_REQUIRED',
           checks: [
-            'Validation-backed refactoring proposals',
-            'Static-analysis AST compliance verified',
-            'Non-destructive additive scaffold',
-            'Sandbox syntax check passed'
+            'Synthetic demo fallback: real repository files were not analyzed.',
+            'Tests executed: NOT_EXECUTED',
+            'Build executed: NOT_EXECUTED'
           ],
-          caveat: null
+          caveat: 'Synthetic fallback sample only. Retry against live backend for real validation.'
         }
       }
     }
@@ -208,19 +223,15 @@ function createClientFallbackAnalysis(repositoryUrl: string): Analysis {
 }
 
 /**
- * Calls the analysis API for a public or private GitHub repository with robust client fallback.
+ * Calls the analysis API for a public or private GitHub repository.
+ * Propagates errors cleanly instead of silently replacing failures with fake data.
  */
 export async function analyzeRepository(repositoryUrl: string): Promise<Analysis> {
-  try {
-    return await request<Analysis>('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repositoryUrl }),
-    })
-  } catch (err) {
-    console.warn('[API] analyzeRepository request failed, providing resilient client fallback:', err)
-    return createClientFallbackAnalysis(repositoryUrl)
-  }
+  return await request<Analysis>('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repositoryUrl }),
+  })
 }
 
 export interface StreamCallbacks {
@@ -232,6 +243,7 @@ export interface StreamCallbacks {
 /**
  * Real-time Server-Sent Events (SSE) repository analysis using fetch streaming.
  * Sends credentials in Authorization header to prevent exposing tokens in URLs.
+ * Surfaces real errors transparently to the UI for retry.
  */
 export async function analyzeRepositoryStream(
   repositoryUrl: string,
@@ -239,79 +251,72 @@ export async function analyzeRepositoryStream(
 ): Promise<Analysis> {
   const authHeaders = await getAuthHeaders()
 
-  try {
-    const response = await fetch(`${API_URL}/api/analyze/stream`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders,
-      },
-      body: JSON.stringify({ repositoryUrl }),
-    })
+  const response = await fetch(`${API_URL}/api/analyze/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+    },
+    body: JSON.stringify({ repositoryUrl }),
+  })
 
-    if (!response.ok) {
-      throw new Error(`SSE stream failed with status ${response.status}`)
-    }
+  if (!response.ok) {
+    const errBody = await response.json().catch(() => null)
+    const msg = errBody?.error || `Analysis stream failed with status ${response.status}.`
+    const err = new Error(msg)
+    callbacks.onError?.(err)
+    throw err
+  }
 
-    if (!response.body) {
-      return await analyzeRepository(repositoryUrl)
-    }
+  if (!response.body) {
+    return await analyzeRepository(repositoryUrl)
+  }
 
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let finalAnalysis: Analysis | null = null
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalAnalysis: Analysis | null = null
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
 
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() || ''
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() || ''
 
-      for (const part of parts) {
-        if (!part.trim()) continue
-        let eventType = 'message'
-        let dataStr = ''
+    for (const part of parts) {
+      if (!part.trim()) continue
+      let eventType = 'message'
+      let dataStr = ''
 
-        for (const line of part.split('\n')) {
-          if (line.startsWith('event: ')) {
-            eventType = line.slice(7).trim()
-          } else if (line.startsWith('data: ')) {
-            dataStr = line.slice(6)
-          }
-        }
-
-        if (!dataStr) continue
-
-        try {
-          const parsed = JSON.parse(dataStr)
-          if (eventType === 'status') {
-            callbacks.onStatus?.(parsed)
-          } else if (eventType === 'agent_event') {
-            callbacks.onAgentEvent?.(parsed)
-          } else if (eventType === 'complete') {
-            finalAnalysis = parsed as Analysis
-          } else if (eventType === 'error') {
-            throw new Error(parsed.error || 'Analysis streaming error')
-          }
-        } catch (err: any) {
-          if (eventType === 'error') throw err
+      for (const line of part.split('\n')) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim()
+        } else if (line.startsWith('data: ')) {
+          dataStr = line.slice(6)
         }
       }
-    }
 
-    if (finalAnalysis) return finalAnalysis
-    return await analyzeRepository(repositoryUrl)
-  } catch (err) {
-    console.warn('[API] analyzeRepositoryStream failed, falling back:', err)
-    try {
-      return await analyzeRepository(repositoryUrl)
-    } catch {
-      return createClientFallbackAnalysis(repositoryUrl)
+      if (!dataStr) continue
+
+      const parsed = JSON.parse(dataStr)
+      if (eventType === 'status') {
+        callbacks.onStatus?.(parsed)
+      } else if (eventType === 'agent_event') {
+        callbacks.onAgentEvent?.(parsed)
+      } else if (eventType === 'complete') {
+        finalAnalysis = parsed as Analysis
+      } else if (eventType === 'error') {
+        const streamErr = new Error(parsed.error || 'Repository analysis encountered a backend error.')
+        callbacks.onError?.(streamErr)
+        throw streamErr
+      }
     }
   }
+
+  if (finalAnalysis) return finalAnalysis
+  throw new Error('Analysis stream ended unexpectedly before delivering final telemetry.')
 }
 
 /**

@@ -8,18 +8,18 @@ const JS_TS_REGEX = /\.(ts|tsx|js|jsx|mjs|cjs)$/i
 /**
  * Analyzes a source code file using the TypeScript AST parser.
  * Calculates cyclomatic complexity, function density, nesting depth,
- * circular/heavy imports, exports, and specific maintainability anti-patterns.
+ * per-function line ranges, circular/heavy imports, exports, and maintainability signals.
  *
  * @param {string} filePath
  * @param {string} content
  * @returns {object} AST metrics and signals
  */
 export function analyzeFileAST(filePath, content) {
-  const lineCount = content.split(/\r?\n/).length
+  const safeContent = typeof content === 'string' ? content : ''
+  const lineCount = safeContent.split(/\r?\n/).length
 
-  // Only run AST parsing on JS/TS files
   if (!JS_TS_REGEX.test(filePath)) {
-    return fallbackRegexMetrics(filePath, content, lineCount)
+    return fallbackRegexMetrics(filePath, safeContent, lineCount)
   }
 
   try {
@@ -34,23 +34,28 @@ export function analyzeFileAST(filePath, content) {
 
     const sourceFile = ts.createSourceFile(
       filePath,
-      content,
+      safeContent,
       ts.ScriptTarget.Latest,
-      /* setParentNodes */ true,
+      true,
       scriptKind
     )
 
     let cyclomaticComplexity = 1
     let functionCount = 0
     let maxNestingDepth = 0
+    let maxNestingLine = 1
     let classCount = 0
     const imports = []
     const exports = []
+    const functionHotspots = []
     let asyncFunctionCount = 0
     let anyTypeCount = 0
     let jsxElementCount = 0
 
-    // Measure maximum block / statement nesting depth
+    function lineAt(pos) {
+      return sourceFile.getLineAndCharacterOfPosition(pos).line + 1
+    }
+
     function getDepth(node) {
       let depth = 0
       let curr = node.parent
@@ -73,8 +78,47 @@ export function analyzeFileAST(filePath, content) {
       return depth
     }
 
+    function computeNodeComplexity(fnNode) {
+      let cc = 1
+      function countBranch(sub) {
+        if (
+          ts.isIfStatement(sub) ||
+          ts.isForStatement(sub) ||
+          ts.isForInStatement(sub) ||
+          ts.isForOfStatement(sub) ||
+          ts.isWhileStatement(sub) ||
+          ts.isDoStatement(sub) ||
+          ts.isCaseClause(sub) ||
+          ts.isCatchClause(sub) ||
+          ts.isConditionalExpression(sub)
+        ) {
+          cc++
+        } else if (
+          ts.isBinaryExpression(sub) &&
+          (sub.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+            sub.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+            sub.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)
+        ) {
+          cc++
+        }
+        ts.forEachChild(sub, countBranch)
+      }
+      if (fnNode.body) countBranch(fnNode.body)
+      return cc
+    }
+
+    function getFnName(node) {
+      if (node.name && ts.isIdentifier(node.name)) return node.name.text
+      if (node.parent && ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+        return node.parent.name.text
+      }
+      if (node.parent && ts.isPropertyAssignment(node.parent) && ts.isIdentifier(node.parent.name)) {
+        return node.parent.name.text
+      }
+      return null
+    }
+
     function walk(node) {
-      // 1. Detect functions and methods
       if (
         ts.isFunctionDeclaration(node) ||
         ts.isFunctionExpression(node) ||
@@ -82,16 +126,28 @@ export function analyzeFileAST(filePath, content) {
         ts.isMethodDeclaration(node)
       ) {
         functionCount++
-        cyclomaticComplexity++ // Base branching for function entry
+        cyclomaticComplexity++
 
-        // Check if async
+        const startLine = lineAt(node.getStart(sourceFile))
+        const endLine = lineAt(node.getEnd())
+        const name = getFnName(node)
+        const fnComplexity = computeNodeComplexity(node)
+
+        if (name || endLine - startLine >= 12) {
+          functionHotspots.push({
+            name: name || `anonymous@${startLine}`,
+            startLine,
+            endLine,
+            lineSpan: endLine - startLine + 1,
+            cyclomaticComplexity: fnComplexity,
+          })
+        }
+
         if (node.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) {
           asyncFunctionCount++
         }
       }
 
-      // 2. Control flow branching for Cyclomatic Complexity calculation:
-      // if, for, while, do..while, case clauses, catch, conditional (ternary), logical AND/OR/nullish
       if (
         ts.isIfStatement(node) ||
         ts.isForStatement(node) ||
@@ -105,10 +161,12 @@ export function analyzeFileAST(filePath, content) {
       ) {
         cyclomaticComplexity++
         const d = getDepth(node)
-        if (d > maxNestingDepth) maxNestingDepth = d
+        if (d > maxNestingDepth) {
+          maxNestingDepth = d
+          maxNestingLine = lineAt(node.getStart(sourceFile))
+        }
       }
 
-      // Binary logical branches (&&, ||, ??)
       if (ts.isBinaryExpression(node)) {
         if (
           node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
@@ -119,19 +177,16 @@ export function analyzeFileAST(filePath, content) {
         }
       }
 
-      // 3. Classes and OOP structures
       if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
         classCount++
       }
 
-      // 4. Track imports (dependencies coupling)
       if (ts.isImportDeclaration(node)) {
         if (node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
           imports.push(node.moduleSpecifier.text)
         }
       }
 
-      // 5. Track exports
       if (ts.isExportDeclaration(node) || ts.isExportAssignment(node)) {
         exports.push(node.getText(sourceFile).slice(0, 30))
       } else if (node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) {
@@ -146,12 +201,10 @@ export function analyzeFileAST(filePath, content) {
         }
       }
 
-      // 6. JSX tags (presentation complexity)
       if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
         jsxElementCount++
       }
 
-      // 7. Typescript `any` type usage
       if (node.kind === ts.SyntaxKind.AnyKeyword) {
         anyTypeCount++
       }
@@ -161,11 +214,8 @@ export function analyzeFileAST(filePath, content) {
 
     walk(sourceFile)
 
-    // Markers in code (comments)
-    const todos = (content.match(/TODO|FIXME|HACK|XXX|BUG/gi) || []).length
+    const todos = (safeContent.match(/TODO|FIXME|HACK|XXX|BUG/gi) || []).length
 
-    // Synthesize AST complexity score
-    // Baseline: line weight + cyclomatic complexity factor + nesting penalty + high function count + debt markers
     const complexityWeight = cyclomaticComplexity * 1.6
     const nestingPenalty = maxNestingDepth > 3 ? (maxNestingDepth - 3) * 6 : 0
     const markerWeight = todos * 6
@@ -206,6 +256,8 @@ export function analyzeFileAST(filePath, content) {
       signals.push(`${anyTypeCount} loose 'any' types`)
     }
 
+    functionHotspots.sort((a, b) => b.cyclomaticComplexity - a.cyclomaticComplexity || b.lineSpan - a.lineSpan)
+
     return {
       path: filePath,
       lines: lineCount,
@@ -215,17 +267,18 @@ export function analyzeFileAST(filePath, content) {
         cyclomaticComplexity,
         functionCount,
         maxNestingDepth,
+        maxNestingLine,
         classCount,
         importCount: imports.length,
         exportCount: exports.length,
         anyTypeCount,
         jsxElementCount,
-        imports: imports.slice(0, 10),
-      }
+        imports: imports.slice(0, 15),
+        functionHotspots: functionHotspots.slice(0, 6),
+      },
     }
   } catch {
-    // If syntax errors prevent complete AST generation, fallback gracefully
-    return fallbackRegexMetrics(filePath, content, lineCount)
+    return fallbackRegexMetrics(filePath, safeContent, lineCount)
   }
 }
 
@@ -244,20 +297,75 @@ function fallbackRegexMetrics(filePath, content, lineCount) {
       lineCount > 250 && 'large file',
       todos > 0 && `${todos} maintenance markers`,
       functions > 8 && 'high function density',
-      controlBranches > 10 && `branching intensity (~${estimatedComplexity})`
+      controlBranches > 10 && `branching intensity (~${estimatedComplexity})`,
     ].filter(Boolean),
     ast: {
       cyclomaticComplexity: estimatedComplexity,
       functionCount: functions,
       maxNestingDepth: 2,
+      maxNestingLine: 1,
       classCount: 0,
       importCount: 0,
       exportCount: 0,
       anyTypeCount: 0,
       jsxElementCount: 0,
-      imports: []
+      imports: [],
+      functionHotspots: [],
+    },
+  }
+}
+
+/**
+ * Detects duplicate multi-line code blocks (6+ normalized lines) across repository files.
+ * @param {Array<{path: string, content: string}>} files
+ * @returns {Array<{ fingerprint: string, lineCount: number, occurrences: Array<{ filePath: string, startLine: number, endLine: number }> }>}
+ */
+export function detectCodeDuplication(files = []) {
+  const windowSize = 6
+  const blockMap = new Map()
+
+  for (const f of files) {
+    if (!f?.path || typeof f.content !== 'string') continue
+    const lines = f.content.split(/\r?\n/)
+    if (lines.length < windowSize) continue
+
+    for (let i = 0; i <= lines.length - windowSize; i++) {
+      const normalized = lines
+        .slice(i, i + windowSize)
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('//') && !l.startsWith('#') && !l.startsWith('*') && !l.startsWith('import '))
+      if (normalized.length < 4) continue
+      const key = normalized.join('\n')
+      if (key.length < 80) continue
+
+      if (!blockMap.has(key)) {
+        blockMap.set(key, [])
+      }
+      const list = blockMap.get(key)
+      // Avoid overlapping duplicate reports inside the exact same lines
+      const overlap = list.some((o) => o.filePath === f.path && Math.abs(o.startLine - (i + 1)) < windowSize)
+      if (!overlap && list.length < 5) {
+        list.push({
+          filePath: f.path,
+          startLine: i + 1,
+          endLine: i + windowSize,
+        })
+      }
     }
   }
+
+  const duplicates = []
+  for (const [key, occurrences] of blockMap.entries()) {
+    if (occurrences.length >= 2) {
+      duplicates.push({
+        fingerprint: key.split('\n')[0].slice(0, 72),
+        lineCount: windowSize,
+        occurrences,
+      })
+    }
+  }
+
+  return duplicates.slice(0, 8)
 }
 
 /**
@@ -296,7 +404,6 @@ export function detectCircularDependencies(files) {
     adj.set(normFrom, neighbors)
   }
 
-  // Find 2-node or 3-node cycles
   const cycles = []
   const seenCycles = new Set()
 
@@ -310,7 +417,7 @@ export function detectCircularDependencies(files) {
             seenCycles.add(key)
             cycles.push({
               cycle: [node, neighbor],
-              description: `Circular dependency between ${node} and ${neighbor}`
+              description: `Circular dependency between ${node} and ${neighbor}`,
             })
           }
         }

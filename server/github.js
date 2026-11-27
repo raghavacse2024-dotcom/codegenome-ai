@@ -2,28 +2,36 @@ import JSZip from 'jszip'
 import { parseRepositoryUrl } from './contracts.js'
 import { createDemoRepository } from './services/demoCacheService.js'
 import { isSensitiveFile } from './services/secretRedactor.js'
+import {
+  isExcludedRepoPath,
+  isManifestFile,
+  CODE_OR_CONFIG_EXTENSIONS,
+  buildRepositoryIndex,
+} from './services/repoIndexer.js'
+import {
+  assertSafeGitHubUrl,
+  validateRepoSegment,
+  sanitizeRepoFilePath,
+} from './services/urlSecurity.js'
 
-const MAX_FILE_BYTES = 45_000
-const MAX_TOTAL_ANALYZED_BYTES = 400_000
+const MAX_FILE_BYTES = 65_000
+const MAX_TOTAL_ANALYZED_BYTES = 2_000_000
 
 export function isRepositoryPolicyFile(filePath) {
   if (!filePath || typeof filePath !== 'string') return false
   const lower = filePath.toLowerCase().replace(/^\/+/, '')
   const baseName = lower.split('/').pop() || ''
 
-  // 1. Direct root or nested policy / agents / contributing files
   if (/^(?:agents|contributing|copilot[-_]instructions|code_of_conduct|security|pull_request_template|pr_template)(?:\.(?:md|rst|txt))?$/i.test(baseName)) {
     return true
   }
 
-  // 2. Any file in .github/ matching contribution / policy / instructions / guidelines
   if (lower.startsWith('.github/') || lower.includes('/.github/')) {
     if (/(?:contribut|policy|guideline|agent|copilot|instruction|pr_template|pull_request_template|dependabot)/i.test(lower)) {
       return true
     }
   }
 
-  // 3. Documentation contribution guides (e.g. docs/contributing.md)
   if (lower.startsWith('docs/') || lower.includes('/docs/')) {
     if (/(?:contribut|policy|agent|guideline)/i.test(baseName)) {
       return true
@@ -34,16 +42,20 @@ export function isRepositoryPolicyFile(filePath) {
 }
 
 const getLimitFiles = (customToken) => {
-  return getCleanToken(customToken) ? 100 : 25
+  return getCleanToken(customToken) ? 350 : 120
 }
 
-const CODE_EXTENSIONS = /\.(?:js|jsx|ts|tsx|py|java|go|rb|php|cs|rs|vue|svelte|css|html|sql)$/i
 const LANGUAGE_BY_EXTENSION = {
   js: 'JavaScript',
   jsx: 'JavaScript',
+  mjs: 'JavaScript',
+  cjs: 'JavaScript',
   ts: 'TypeScript',
   tsx: 'TypeScript',
+  mts: 'TypeScript',
+  cts: 'TypeScript',
   py: 'Python',
+  pyi: 'Python',
   java: 'Java',
   go: 'Go',
   rb: 'Ruby',
@@ -53,12 +65,14 @@ const LANGUAGE_BY_EXTENSION = {
   vue: 'Vue',
   svelte: 'Svelte',
   css: 'CSS',
+  scss: 'CSS',
   html: 'HTML',
   sql: 'SQL',
 }
 
 const repositoryCache = new Map()
-const REPO_CACHE_TTL = 1000 * 60 * 10 // 10 minutes
+const shaCache = new Map()
+const REPO_CACHE_TTL = 1000 * 60 * 15 // 15 minutes
 
 const getCleanToken = (customToken) => {
   if (customToken && typeof customToken === 'string') {
@@ -80,51 +94,74 @@ const headers = (customToken) => {
   }
 }
 
-function computeSamplingMetadata({
+export function computeSamplingMetadata({
   analyzedFiles,
   totalFiles = null,
-  limit = 25,
+  eligibleSourceFiles = null,
+  excludedCount = 0,
+  limit = 120,
   policyFilesDiscovered = [],
   policyFilesInspected = [],
   policyInspectionComplete = false,
   samplingStatus = null,
+  commitSha = null,
+  cacheHit = false,
 }) {
   const analyzedFileCount = analyzedFiles.length
-  const repositoryFileCount = totalFiles !== null ? totalFiles : analyzedFileCount
+  const repositoryFileCount = eligibleSourceFiles !== null
+    ? eligibleSourceFiles
+    : (totalFiles !== null ? totalFiles : analyzedFileCount)
   const samplingUsed = repositoryFileCount > analyzedFileCount
   const skippedFileCount = Math.max(0, repositoryFileCount - analyzedFileCount)
   const totalAnalyzedBytes = analyzedFiles.reduce((acc, f) => acc + (f.size || f.content?.length || 0), 0)
 
-  let analysisCoverage = 'sampled'
+  let analysisCoverage = '0%'
+  let completeness = 'sample-based'
   let status = samplingStatus || (samplingUsed ? 'sampled' : 'full')
+
   if (repositoryFileCount === 0 || analyzedFileCount === 0) {
     status = 'unavailable'
+    completeness = 'unavailable'
     analysisCoverage = '0%'
-  } else if (!samplingUsed && repositoryFileCount === analyzedFileCount) {
+  } else if (!samplingUsed && repositoryFileCount <= analyzedFileCount) {
     status = 'full'
+    completeness = 'complete'
     analysisCoverage = '100%'
   } else if (repositoryFileCount > 0) {
-    status = 'sampled'
     const ratio = Math.round((analyzedFileCount / repositoryFileCount) * 100)
     analysisCoverage = `${Math.min(99, Math.max(1, ratio))}%`
+    if (ratio >= 60) {
+      status = 'partial'
+      completeness = 'partial'
+    } else {
+      status = 'sampled'
+      completeness = 'sample-based'
+    }
   }
 
-  const samplingNotice = status === 'full'
-    ? `Complete analysis of all ${analyzedFileCount} detected source files in repository.`
-    : status === 'sampled'
-    ? `Analysis is based on a sampled subset of repository files (${analyzedFileCount} of ${repositoryFileCount} files analyzed, ${analysisCoverage} coverage).`
+  const samplingNotice = completeness === 'complete'
+    ? `Complete repository analysis: all ${analyzedFileCount} indexable source/config files analyzed (excluding ${excludedCount} dependency/build artifacts).`
+    : completeness === 'partial'
+    ? `Partial repository analysis: ${analyzedFileCount} of ${repositoryFileCount} source files indexed (${analysisCoverage} coverage; ${excludedCount} generated/dependency files excluded).`
+    : completeness === 'sample-based'
+    ? `Sample-based repository analysis: ${analyzedFileCount} of ${repositoryFileCount} source files analyzed (${analysisCoverage} coverage).`
     : `Repository files were unavailable from GitHub; using resilient demo-safe analysis.`
 
   return {
     analyzedFileCount,
     repositoryFileCount,
+    totalTreeFiles: totalFiles !== null ? totalFiles : repositoryFileCount,
+    excludedFileCount: excludedCount,
     samplingUsed,
     samplingLimit: limit,
     skippedFileCount,
     totalAnalyzedBytes,
     analysisCoverage,
     samplingStatus: status,
+    completeness,
     samplingNotice,
+    commitSha,
+    cacheHit,
     policyFilesDiscovered,
     policyFilesInspected,
     policyInspectionComplete,
@@ -133,28 +170,34 @@ function computeSamplingMetadata({
 
 function fallbackRepository(owner, repository, reason) {
   const demo = createDemoRepository(owner, repository, reason, buildStructure)
+  const repoIndex = buildRepositoryIndex(demo.files)
   const metadata = computeSamplingMetadata({
     analyzedFiles: demo.files,
     totalFiles: demo.files.length,
+    eligibleSourceFiles: demo.files.length,
     limit: 25,
     policyFilesDiscovered: [],
     policyFilesInspected: [],
     policyInspectionComplete: false,
     samplingStatus: 'unavailable',
   })
-  metadata.samplingNotice = 'Repository files were unavailable from GitHub; using resilient demo-safe analysis.'
+  metadata.samplingNotice = `GitHub repository files could not be retrieved (${reason}). Showing clearly labeled synthetic demo fallback.`
   metadata.analysisCoverage = 'unavailable'
+  metadata.completeness = 'unavailable'
   return {
     ...demo,
     source: 'demo',
     mode: 'demo',
     policyFiles: [],
+    repoIndex,
     metadata,
   }
 }
 
-async function githubFetch(path, customToken) {
-  const response = await fetch(`https://api.github.com${path}`, { headers: headers(customToken), signal: AbortSignal.timeout(8_000) })
+async function githubFetch(apiPath, customToken) {
+  const targetUrl = `https://api.github.com${apiPath}`
+  assertSafeGitHubUrl(targetUrl)
+  const response = await fetch(targetUrl, { headers: headers(customToken), signal: AbortSignal.timeout(10_000) })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw Object.assign(
@@ -165,31 +208,95 @@ async function githubFetch(path, customToken) {
   return response.json()
 }
 
-async function fetchRepositoryArchive(owner, repository, customToken) {
-  const branchCandidates = ['main', 'master']
+/**
+ * Paginated directory tree traversal via GitHub Git Trees API when recursive=1 is truncated.
+ * Traverses breadth-first through non-excluded directories so large repos are thoroughly indexed.
+ */
+async function fetchPaginatedGitTree(owner, repository, rootTreeSha, customToken, maxNodes = 2500) {
+  const collectedBlobs = []
+  const queue = [{ sha: rootTreeSha, prefix: '' }]
+  const visitedTrees = new Set()
+  let pagesFetched = 0
+  const maxTreeRequests = 25
+
+  while (queue.length > 0 && pagesFetched < maxTreeRequests && collectedBlobs.length < maxNodes) {
+    const { sha, prefix } = queue.shift()
+    if (!sha || visitedTrees.has(sha)) continue
+    visitedTrees.add(sha)
+    pagesFetched++
+
+    const treeData = await githubFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/git/trees/${encodeURIComponent(sha)}`,
+      customToken
+    )
+    for (const item of treeData.tree || []) {
+      const fullPath = prefix ? `${prefix}/${item.path}` : item.path
+      if (item.type === 'tree') {
+        if (!isExcludedRepoPath(`${fullPath}/placeholder`)) {
+          queue.push({ sha: item.sha, prefix: fullPath })
+        }
+      } else if (item.type === 'blob') {
+        collectedBlobs.push({ ...item, path: fullPath })
+      }
+    }
+  }
+
+  return collectedBlobs
+}
+
+/**
+ * Prioritizes manifests, entrypoints, core source files, and tests ahead of auxiliary files.
+ */
+function prioritizeCandidateBlobs(blobs) {
+  return [...blobs].sort((a, b) => {
+    const score = (p) => {
+      if (isManifestFile(p)) return 100
+      if (/^(?:src|app|server|lib|core|packages\/[^/]+\/src)\//i.test(p)) return 80
+      if (/(?:main|index|app|server|router|routes|api)\./i.test(p)) return 70
+      if (/\.(?:ts|tsx|js|jsx|py|go|rs|java)$/i.test(p)) return 50
+      if (/test|spec/i.test(p)) return 30
+      return 10
+    }
+    return score(b.path) - score(a.path)
+  })
+}
+
+async function fetchRepositoryArchive(owner, repository, customToken, preferredBranch = null) {
+  const branchCandidates = preferredBranch ? [preferredBranch, 'main', 'master'] : ['main', 'master']
+  const uniqueBranches = [...new Set(branchCandidates.filter(Boolean))]
   let lastFailure = null
   const authHeaders = headers(customToken)
   const limit = getLimitFiles(customToken)
-  for (const branch of branchCandidates) {
+
+  for (const branch of uniqueBranches) {
     try {
-      const response = await fetch(`https://api.github.com/repos/${owner}/${repository}/zipball/${branch}`, {
+      const apiArchiveUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/zipball/${encodeURIComponent(branch)}`
+      assertSafeGitHubUrl(apiArchiveUrl)
+      const response = await fetch(apiArchiveUrl, {
         headers: authHeaders,
-        signal: AbortSignal.timeout(8_000),
+        signal: AbortSignal.timeout(12_000),
       })
+
+      let buffer
       if (!response.ok) {
-        const publicRes = await fetch(`https://codeload.github.com/${owner}/${repository}/zip/refs/heads/${branch}`, { signal: AbortSignal.timeout(6_000) })
+        const publicZipUrl = `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/zip/refs/heads/${encodeURIComponent(branch)}`
+        assertSafeGitHubUrl(publicZipUrl)
+        const publicRes = await fetch(publicZipUrl, { signal: AbortSignal.timeout(10_000) })
         if (!publicRes.ok) {
           lastFailure = new Error(`GitHub archive request returned ${response.status}.`)
           continue
         }
-        var buffer = await publicRes.arrayBuffer()
+        buffer = await publicRes.arrayBuffer()
       } else {
-        var buffer = await response.arrayBuffer()
+        buffer = await response.arrayBuffer()
       }
+
       const zip = await JSZip.loadAsync(buffer)
       const files = []
       const policyFiles = []
       let totalFiles = 0
+      let excludedCount = 0
+      let eligibleSourceFiles = 0
       let totalBytesAccumulated = 0
 
       for (const entry of Object.values(zip.files)) {
@@ -197,46 +304,64 @@ async function fetchRepositoryArchive(owner, repository, customToken) {
         totalFiles++
         const parts = entry.name.split('/')
         if (parts.length < 2) continue
-        const path = parts.slice(1).join('/')
+        const filePath = sanitizeRepoFilePath(parts.slice(1).join('/'))
+        if (!filePath) continue
 
-        // Exclude sensitive files (.env, keys, credentials)
-        if (isSensitiveFile(path)) continue
+        if (isSensitiveFile(filePath)) {
+          excludedCount++
+          continue
+        }
 
-        // 1. Policy files are captured independently of code limits
-        if (isRepositoryPolicyFile(path)) {
+        if (isRepositoryPolicyFile(filePath)) {
           const policyContent = (await entry.async('string')).slice(0, MAX_FILE_BYTES)
           if (policyContent) {
-            policyFiles.push({ path, size: policyContent.length, content: policyContent })
+            policyFiles.push({ path: filePath, size: policyContent.length, content: policyContent })
           }
           continue
         }
 
-        if (!CODE_EXTENSIONS.test(path)) continue
+        if (isExcludedRepoPath(filePath)) {
+          excludedCount++
+          continue
+        }
+
+        if (!CODE_OR_CONFIG_EXTENSIONS.test(filePath) && !isManifestFile(filePath)) continue
+        eligibleSourceFiles++
 
         if (files.length < limit && totalBytesAccumulated < MAX_TOTAL_ANALYZED_BYTES) {
           const content = (await entry.async('string')).slice(0, MAX_FILE_BYTES)
           if (!content) continue
-          files.push({ path, size: content.length, content })
+          files.push({ path: filePath, size: content.length, content })
           totalBytesAccumulated += content.length
         }
       }
 
       if (files.length) {
+        const repoIndex = buildRepositoryIndex(files)
         const metadata = computeSamplingMetadata({
           analyzedFiles: files,
           totalFiles,
+          eligibleSourceFiles,
+          excludedCount,
           limit,
           policyFilesDiscovered: policyFiles.map((p) => p.path),
           policyFilesInspected: policyFiles.map((p) => p.path),
           policyInspectionComplete: true,
-          samplingStatus: totalFiles > files.length ? 'sampled' : 'full',
         })
         return {
-          repo: { owner, repository, url: `https://github.com/${owner}/${repository}`, description: '', stars: 0, defaultBranch: branch },
+          repo: {
+            owner,
+            repository,
+            url: `https://github.com/${owner}/${repository}`,
+            description: '',
+            stars: 0,
+            defaultBranch: branch,
+          },
           files,
           policyFiles,
-          structure: buildStructure(files),
-          truncated: totalFiles > files.length,
+          repoIndex,
+          structure: buildStructure(files, repoIndex.projectInfo),
+          truncated: eligibleSourceFiles > files.length,
           metadata,
           source: 'github-archive',
           mode: 'live',
@@ -254,41 +379,94 @@ const isTesting = Boolean(process.env.VITEST || process.env.NODE_ENV === 'test')
 
 export function clearRepositoryCache() {
   repositoryCache.clear()
+  shaCache.clear()
+}
+
+async function fetchBlobContent({ owner, repository, branch, item, tokenForReq, isPrivate }) {
+  const safePath = sanitizeRepoFilePath(item.path)
+  if (!safePath) return ''
+
+  if (tokenForReq || isPrivate) {
+    const blobRes = await githubFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/git/blobs/${encodeURIComponent(item.sha)}`,
+      tokenForReq
+    )
+    if (blobRes?.content) {
+      return Buffer.from(blobRes.content, 'base64').toString('utf-8').slice(0, MAX_FILE_BYTES)
+    }
+  }
+
+  const encodedPath = safePath.split('/').map((seg) => encodeURIComponent(seg)).join('/')
+  const rawUrl = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${encodeURIComponent(branch)}/${encodedPath}`
+  assertSafeGitHubUrl(rawUrl)
+  const raw = await fetch(rawUrl, { signal: AbortSignal.timeout(5_000) })
+  return raw.ok ? (await raw.text()).slice(0, MAX_FILE_BYTES) : ''
 }
 
 export async function fetchRepository(repositoryUrl, customToken = null) {
-  const { owner, repository, url } = parseRepositoryUrl(repositoryUrl)
+  const { owner: rawOwner, repository: rawRepo, url } = parseRepositoryUrl(repositoryUrl)
+  const owner = validateRepoSegment(rawOwner, 'owner')
+  const repository = validateRepoSegment(rawRepo, 'repository')
+
   const tokenForReq = getCleanToken(customToken)
   const cacheKey = `${owner}/${repository}${tokenForReq ? '_auth' : ''}`.toLowerCase()
   const cached = repositoryCache.get(cacheKey)
   if (!isTesting && cached && (Date.now() - cached.timestamp < REPO_CACHE_TTL)) {
-    return cached.data
+    return {
+      ...cached.data,
+      metadata: { ...cached.data.metadata, cacheHit: true },
+    }
   }
 
   try {
     const limit = getLimitFiles(customToken)
-    const metadata = await githubFetch(`/repos/${owner}/${repository}`, tokenForReq)
-    const branch = metadata.default_branch || 'main'
-    const tree = await githubFetch(`/repos/${owner}/${repository}/git/trees/${encodeURIComponent(branch)}?recursive=1`, tokenForReq)
-    
-    const allTreeBlobs = (tree.tree || []).filter((item) => item.type === 'blob')
+    const repoMeta = await githubFetch(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`, tokenForReq)
+    const branch = repoMeta.default_branch || 'main'
+
+    const tree = await githubFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      tokenForReq
+    )
+
+    const commitSha = tree?.sha || null
+    const shaCacheKey = commitSha ? `${owner}/${repository}@${commitSha}${tokenForReq ? '_auth' : ''}`.toLowerCase() : null
+    if (!isTesting && shaCacheKey && shaCache.has(shaCacheKey)) {
+      const shaCached = shaCache.get(shaCacheKey)
+      return {
+        ...shaCached,
+        metadata: { ...shaCached.metadata, cacheHit: true },
+      }
+    }
+
+    let allTreeBlobs = (tree.tree || []).filter((item) => item.type === 'blob')
+    // If GitHub truncated the recursive tree (large repo), perform paginated breadth-first traversal
+    if (tree.truncated && tree.sha) {
+      try {
+        const paginatedBlobs = await fetchPaginatedGitTree(owner, repository, tree.sha, tokenForReq)
+        if (paginatedBlobs.length > allTreeBlobs.length) {
+          allTreeBlobs = paginatedBlobs
+        }
+      } catch (pagErr) {
+        console.warn('[GitHub] Paginated tree traversal notice:', pagErr.message)
+      }
+    }
+
     const totalFiles = allTreeBlobs.length
 
-    // 1. Separate Policy & Configuration Files Discovery (DOES NOT CONSUME SOURCE CODE SAMPLING BUDGET)
+    // 1. Separate Policy & Configuration Files Discovery
     const policyBlobs = allTreeBlobs.filter((item) => isRepositoryPolicyFile(item.path))
     const policyFilesDiscovered = policyBlobs.map((item) => item.path)
 
     const rawPolicyFiles = await Promise.all(policyBlobs.map(async (item) => {
       try {
-        if (tokenForReq || metadata.private) {
-          const blobRes = await githubFetch(`/repos/${owner}/${repository}/git/blobs/${item.sha}`, tokenForReq)
-          if (blobRes?.content) {
-            const decoded = Buffer.from(blobRes.content, 'base64').toString('utf-8').slice(0, MAX_FILE_BYTES)
-            return { path: item.path, size: item.size, content: decoded }
-          }
-        }
-        const raw = await fetch(`https://raw.githubusercontent.com/${owner}/${repository}/${branch}/${item.path}`, { signal: AbortSignal.timeout(4_000) })
-        const text = raw.ok ? (await raw.text()).slice(0, MAX_FILE_BYTES) : ''
+        const text = await fetchBlobContent({
+          owner,
+          repository,
+          branch,
+          item,
+          tokenForReq,
+          isPrivate: Boolean(repoMeta.private),
+        })
         return { path: item.path, size: item.size, content: text }
       } catch {
         return { path: item.path, size: item.size, content: '' }
@@ -298,59 +476,87 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
     const policyFilesInspected = validPolicyFiles.map((f) => f.path)
     const policyInspectionComplete = true
 
-    // 2. Filter valid candidate code files for AST analysis
-    const candidates = allTreeBlobs
-      .filter((item) => !isSensitiveFile(item.path) && CODE_EXTENSIONS.test(item.path) && item.size <= MAX_FILE_BYTES)
-      .slice(0, limit)
-
-    let totalBytesAccumulated = 0
-    const files = await Promise.all(candidates.map(async (item) => {
-      try {
-        if (totalBytesAccumulated >= MAX_TOTAL_ANALYZED_BYTES) {
-          return { path: item.path, size: item.size, content: '' }
-        }
-        if (tokenForReq || metadata.private) {
-          const blobRes = await githubFetch(`/repos/${owner}/${repository}/git/blobs/${item.sha}`, tokenForReq)
-          if (blobRes?.content) {
-            const decoded = Buffer.from(blobRes.content, 'base64').toString('utf-8').slice(0, MAX_FILE_BYTES)
-            totalBytesAccumulated += decoded.length
-            return { path: item.path, size: item.size, content: decoded }
-          }
-        }
-        const raw = await fetch(`https://raw.githubusercontent.com/${owner}/${repository}/${branch}/${item.path}`, { signal: AbortSignal.timeout(4_000) })
-        const text = raw.ok ? (await raw.text()).slice(0, MAX_FILE_BYTES) : ''
-        totalBytesAccumulated += text.length
-        return { path: item.path, size: item.size, content: text }
-      } catch {
-        return { path: item.path, size: item.size, content: '' }
+    // 2. Exclude unnecessary directories/generated files & identify eligible source/manifest files
+    let excludedCount = 0
+    const eligibleBlobs = []
+    for (const item of allTreeBlobs) {
+      if (isRepositoryPolicyFile(item.path)) continue
+      if (isSensitiveFile(item.path) || isExcludedRepoPath(item.path)) {
+        excludedCount++
+        continue
       }
-    }))
+      if ((CODE_OR_CONFIG_EXTENSIONS.test(item.path) || isManifestFile(item.path)) && (item.size === undefined || item.size <= MAX_FILE_BYTES)) {
+        eligibleBlobs.push(item)
+      }
+    }
 
-    const sampledFiles = files.filter((file) => file.content)
+    const prioritized = prioritizeCandidateBlobs(eligibleBlobs).slice(0, limit)
+
+    // Fetch in bounded concurrent batches of 15 to avoid socket/rate exhaustion
+    const sampledFiles = []
+    let totalBytesAccumulated = 0
+    const batchSize = 15
+
+    for (let i = 0; i < prioritized.length; i += batchSize) {
+      if (totalBytesAccumulated >= MAX_TOTAL_ANALYZED_BYTES) break
+      const batch = prioritized.slice(i, i + batchSize)
+      const fetchedBatch = await Promise.all(batch.map(async (item) => {
+        try {
+          const text = await fetchBlobContent({
+            owner,
+            repository,
+            branch,
+            item,
+            tokenForReq,
+            isPrivate: Boolean(repoMeta.private),
+          })
+          if (!text) return null
+          return { path: item.path, size: item.size || text.length, content: text }
+        } catch {
+          return null
+        }
+      }))
+
+      for (const file of fetchedBatch) {
+        if (!file) continue
+        if (totalBytesAccumulated + file.content.length > MAX_TOTAL_ANALYZED_BYTES && sampledFiles.length > 0) {
+          break
+        }
+        sampledFiles.push(file)
+        totalBytesAccumulated += file.content.length
+      }
+    }
+
+    const repoIndex = buildRepositoryIndex(sampledFiles)
     const samplingMeta = computeSamplingMetadata({
       analyzedFiles: sampledFiles,
       totalFiles,
+      eligibleSourceFiles: eligibleBlobs.length,
+      excludedCount,
       limit,
       policyFilesDiscovered,
       policyFilesInspected,
       policyInspectionComplete,
-      samplingStatus: totalFiles > sampledFiles.length ? 'sampled' : 'full',
+      commitSha,
+      cacheHit: false,
     })
 
-    const result = { 
-      repo: { 
-        owner, 
-        repository, 
-        url, 
-        description: metadata.description || '', 
-        stars: metadata.stargazers_count || 0, 
-        defaultBranch: branch, 
-        private: Boolean(metadata.private) 
-      }, 
-      files: sampledFiles, 
+    const result = {
+      repo: {
+        owner,
+        repository,
+        url,
+        description: repoMeta.description || '',
+        stars: repoMeta.stargazers_count || 0,
+        defaultBranch: branch,
+        private: Boolean(repoMeta.private),
+        commitSha,
+      },
+      files: sampledFiles,
       policyFiles: validPolicyFiles,
-      structure: buildStructure(sampledFiles), 
-      truncated: totalFiles > sampledFiles.length,
+      repoIndex,
+      structure: buildStructure(sampledFiles, repoIndex.projectInfo),
+      truncated: eligibleBlobs.length > sampledFiles.length,
       metadata: samplingMeta,
       source: 'github-api',
       mode: 'live',
@@ -358,6 +564,9 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
 
     if (!isTesting) {
       repositoryCache.set(cacheKey, { timestamp: Date.now(), data: result })
+      if (shaCacheKey) {
+        shaCache.set(shaCacheKey, result)
+      }
     }
     return result
   } catch (error) {
@@ -379,14 +588,28 @@ export async function fetchRepository(repositoryUrl, customToken = null) {
   }
 }
 
-export function buildStructure(files) {
-  const rootDirectories = [...new Set(files.map((file) => file.path.split('/')[0]).filter(Boolean))].slice(0, 8)
+export function buildStructure(files, projectInfo = null) {
+  const rootDirectories = [...new Set(files.map((file) => file.path.split('/')[0]).filter(Boolean))].slice(0, 12)
   const languages = {}
   for (const file of files) {
     const extension = file.path.split('.').pop()?.toLowerCase()
     const language = LANGUAGE_BY_EXTENSION[extension] || 'Other'
     languages[language] = (languages[language] || 0) + 1
   }
-  const entryPoints = files.filter((file) => /(^|\/)(main|index|app|server|routes?)\.(?:js|jsx|ts|tsx|py)$/i.test(file.path)).map((file) => file.path).slice(0, 6)
-  return { sampledFileCount: files.length, rootDirectories, languages: Object.entries(languages).sort(([, left], [, right]) => right - left).slice(0, 5), entryPoints }
+  const entryPoints = files
+    .filter((file) => /(^|\/)(main|index|app|server|routes?)\.(?:js|jsx|ts|tsx|py|go|rs)$/i.test(file.path))
+    .map((file) => file.path)
+    .slice(0, 8)
+
+  return {
+    sampledFileCount: files.length,
+    rootDirectories,
+    languages: Object.entries(languages).sort(([, left], [, right]) => right - left).slice(0, 6),
+    entryPoints,
+    ...(projectInfo ? {
+      frameworks: projectInfo.frameworks,
+      dependencies: projectInfo.dependencies.slice(0, 25),
+      packageManagers: projectInfo.packageManagers,
+    } : {}),
+  }
 }

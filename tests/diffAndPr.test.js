@@ -46,7 +46,7 @@ describe('Git Diff Service', () => {
 })
 
 describe('Automated PR Service', () => {
-  it('falls back to simulated preview mode gracefully when token is mock or invalid', async () => {
+  it('blocks live PR creation and prepares CLI export when validation is unexecuted or policy is unknown', async () => {
     const targetFile = {
       path: 'src/legacy.ts',
       content: 'console.log("hello")\n',
@@ -67,10 +67,13 @@ describe('Automated PR Service', () => {
       branch: 'codegenome/test-branch',
     })
 
-    expect(result.success).toBe(true)
-    expect(result.mode).toBe('simulated')
+    expect(result.success).toBe(false)
+    expect(result.githubStatus).toBe('NOT_ATTEMPTED')
+    expect(result.prCreated).toBe(false)
+    expect(result.state).toBe('POLICY_UNKNOWN')
     expect(result.branch).toBe('codegenome/test-branch')
     expect(result.cliCommand).toContain('git checkout -b codegenome/test-branch')
     expect(result.cliCommand).toContain('git apply')
+    expect(result.allowsManualExport).toBe(true)
   })
 })
